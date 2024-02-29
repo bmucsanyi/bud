@@ -1,0 +1,26 @@
+Bootstrap: docker
+From: ubuntu:latest
+
+%post
+    export DEBIAN_FRONTEND=noninteractive
+    ln -fs /usr/share/zoneinfo/Etc/UTC /etc/localtime
+    echo 'Etc/UTC' > /etc/timezone
+
+    apt update && apt upgrade -y
+    apt install -y software-properties-common
+    add-apt-repository ppa:deadsnakes/ppa
+    apt update
+    apt install -y python3.11 python3.11-venv python3.11-distutils python3.11-dev
+    apt install -y libmagickwand-dev
+
+    # Install and upgrade pip
+    python3.11 -m ensurepip
+    python3.11 -m pip install --upgrade pip
+
+    python3.11 -m pip install torch==2.0.1 numpy pandas torchmetrics tqdm \
+                              tueplots wandb torchvision scipy wand scikit-image \
+                              opencv-python scikit-learn faiss-cpu huggingface-hub \
+                              laplace-torch
+
+    # Create a symbolic link for python to point to python3.11
+    ln -sf /usr/bin/python3.11 /usr/bin/python
