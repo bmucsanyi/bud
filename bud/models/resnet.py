@@ -10,6 +10,7 @@ CIFAR ResNet variants implemented based on https://github.com/google/uncertainty
 Copyright 2019 Ross Wightman
       and 2024 Bálint Mucsányi
 """
+
 import math
 from functools import partial
 
@@ -305,16 +306,57 @@ def downsample_avg(
     )
 
 
+class AvgPoolShortCut(nn.Module):
+    def __init__(self, stride, out_c, in_c):
+        super(AvgPoolShortCut, self).__init__()
+        self.stride = stride
+        self.out_c = out_c
+        self.in_c = in_c
+
+    def forward(self, x):
+        if x.shape[2] % 2 != 0:
+            x = F.avg_pool2d(x, 1, self.stride)
+        else:
+            x = F.avg_pool2d(x, self.stride, self.stride)
+        pad = torch.zeros(
+            x.shape[0],
+            self.out_c - self.in_c,
+            x.shape[2],
+            x.shape[3],
+            device=x.device,
+        )
+        x = torch.cat((x, pad), dim=1)
+        return x
+
+
+def downsample_ddu(
+    in_channels,
+    out_channels,
+    kernel_size,
+    stride=1,
+    dilation=1,
+    first_dilation=None,
+    norm_layer=None,
+):
+    return nn.Sequential(
+        AvgPoolShortCut(stride=stride, out_c=out_channels, in_c=in_channels)
+    )
+
+
 def drop_blocks(drop_prob=0.0):
     return [
         None,
         None,
-        partial(DropBlock2d, drop_prob=drop_prob, block_size=5, gamma_scale=0.25)
-        if drop_prob
-        else None,
-        partial(DropBlock2d, drop_prob=drop_prob, block_size=3, gamma_scale=1.00)
-        if drop_prob
-        else None,
+        (
+            partial(DropBlock2d, drop_prob=drop_prob, block_size=5, gamma_scale=0.25)
+            if drop_prob
+            else None
+        ),
+        (
+            partial(DropBlock2d, drop_prob=drop_prob, block_size=3, gamma_scale=1.00)
+            if drop_prob
+            else None
+        ),
     ]
 
 
@@ -326,7 +368,7 @@ def make_blocks(
     reduce_first=1,
     output_stride=32,
     down_kernel_size=1,
-    avg_down=False,
+    down_type="conv",
     drop_block_rate=0.0,
     drop_path_rate=0.0,
     **kwargs,
@@ -359,11 +401,12 @@ def make_blocks(
                 first_dilation=prev_dilation,
                 norm_layer=kwargs.get("norm_layer"),
             )
-            downsample = (
-                downsample_avg(**down_kwargs)
-                if avg_down
-                else downsample_conv(**down_kwargs)
-            )
+            if down_type == "conv":
+                downsample = downsample_conv(**down_kwargs)
+            elif down_type == "avg":
+                downsample = downsample_avg(**down_kwargs)
+            else:
+                downsample = downsample_ddu(**down_kwargs)
 
         block_kwargs = dict(
             reduce_first=reduce_first, dilation=dilation, drop_block=db, **kwargs
@@ -445,7 +488,7 @@ class ResNet(nn.Module):
         replace_stem_pool=False,
         block_reduce_first=1,
         down_kernel_size=1,
-        avg_down=False,
+        down_type="conv",
         act_layer=nn.ReLU,
         norm_layer=nn.BatchNorm2d,
         aa_layer=None,
@@ -475,7 +518,7 @@ class ResNet(nn.Module):
                 1 for all archs except senets, where 2 (default 1)
             down_kernel_size (int): kernel size of residual block downsample path,
                 1x1 for most, 3x3 for senets (default: 1)
-            avg_down (bool): use avg pooling for projection skip connection between stages/downsample (default False)
+            down_type (str): type of projection skip connection between stages/downsample (default conv)
             act_layer (str, nn.Module): activation layer
             norm_layer (str, nn.Module): normalization layer
             aa_layer (nn.Module): anti-aliasing layer
@@ -541,9 +584,11 @@ class ResNet(nn.Module):
                             padding=1,
                             bias=False,
                         ),
-                        create_aa(aa_layer, channels=inplanes, stride=2)
-                        if aa_layer is not None
-                        else None,
+                        (
+                            create_aa(aa_layer, channels=inplanes, stride=2)
+                            if aa_layer is not None
+                            else None
+                        ),
                         norm_layer(inplanes),
                         act_layer(inplace=True),
                     ],
@@ -574,7 +619,7 @@ class ResNet(nn.Module):
             base_width=base_width,
             output_stride=output_stride,
             reduce_first=block_reduce_first,
-            avg_down=avg_down,
+            down_type=down_type,
             down_kernel_size=down_kernel_size,
             act_layer=act_layer,
             norm_layer=norm_layer,
@@ -659,7 +704,7 @@ class ResNet(nn.Module):
 class BasicBlockCIFAR(nn.Module):
     expansion = 1
 
-    def __init__(self, in_planes, planes, stride=1):
+    def __init__(self, in_planes, planes, stride=1, down_type="conv"):
         super().__init__()
         self.conv1 = nn.Conv2d(
             in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False
@@ -674,16 +719,25 @@ class BasicBlockCIFAR(nn.Module):
 
         self.shortcut = nn.Sequential()
         if stride != 1 or in_planes != self.expansion * planes:
-            self.shortcut = nn.Sequential(
-                nn.Conv2d(
-                    in_planes,
-                    self.expansion * planes,
-                    kernel_size=1,
-                    stride=stride,
-                    bias=False,
-                ),
-                nn.BatchNorm2d(self.expansion * planes),
-            )
+            if down_type == "conv":
+                self.shortcut = nn.Sequential(
+                    nn.Conv2d(
+                        in_planes,
+                        self.expansion * planes,
+                        kernel_size=1,
+                        stride=stride,
+                        bias=False,
+                    ),
+                    nn.BatchNorm2d(self.expansion * planes),
+                )
+            elif down_type == "ddu":
+                self.shortcut = nn.Sequential(
+                    AvgPoolShortCut(
+                        stride=stride, out_c=self.expansion * planes, in_c=in_planes
+                    )
+                )
+            else:
+                raise ValueError("Invalid downsample type provided.")
 
     def forward(self, x):
         out = self.act1(self.bn1(self.conv1(x)))
@@ -696,7 +750,7 @@ class BasicBlockCIFAR(nn.Module):
 class BottleneckCIFAR(nn.Module):
     expansion = 4
 
-    def __init__(self, in_planes, planes, stride=1):
+    def __init__(self, in_planes, planes, stride=1, down_type="conv"):
         super().__init__()
         self.conv1 = nn.Conv2d(in_planes, planes, kernel_size=1, bias=False)
         self.bn1 = nn.BatchNorm2d(planes)
@@ -716,16 +770,25 @@ class BottleneckCIFAR(nn.Module):
 
         self.shortcut = nn.Sequential()
         if stride != 1 or in_planes != self.expansion * planes:
-            self.shortcut = nn.Sequential(
-                nn.Conv2d(
-                    in_planes,
-                    self.expansion * planes,
-                    kernel_size=1,
-                    stride=stride,
-                    bias=False,
-                ),
-                nn.BatchNorm2d(self.expansion * planes),
-            )
+            if down_type == "conv":
+                self.shortcut = nn.Sequential(
+                    nn.Conv2d(
+                        in_planes,
+                        self.expansion * planes,
+                        kernel_size=1,
+                        stride=stride,
+                        bias=False,
+                    ),
+                    nn.BatchNorm2d(self.expansion * planes),
+                )
+            elif down_type == "ddu":
+                self.shortcut = nn.Sequential(
+                    AvgPoolShortCut(
+                        stride=stride, out_c=self.expansion * planes, in_c=in_planes
+                    )
+                )
+            else:
+                raise ValueError("Invalid downsample type provided.")
 
     def forward(self, x):
         out = self.act1(self.bn1(self.conv1(x)))
@@ -737,11 +800,20 @@ class BottleneckCIFAR(nn.Module):
 
 
 class ResNetCIFAR(nn.Module):
-    def __init__(self, block, depth, width_multiplier=1, num_classes=10):
+    def __init__(
+        self,
+        block,
+        depth,
+        width_multiplier=1,
+        num_classes=10,
+        down_type="conv",
+        act="relu",
+    ):
         super().__init__()
         self.in_planes = 16
         self.num_classes = num_classes
         self.num_features = 64 * block.expansion
+        self.down_type = down_type
 
         assert (
             depth - 2
@@ -750,7 +822,7 @@ class ResNetCIFAR(nn.Module):
 
         self.conv1 = nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(16)
-        self.act1 = nn.ReLU()
+        self.act1 = nn.ReLU() if act == "relu" else nn.LeakyReLU()
         self.layer1 = self.make_layer(block, 16 * width_multiplier, n, stride=1)
         self.layer2 = self.make_layer(block, 32 * width_multiplier, n, stride=2)
         self.layer3 = self.make_layer(block, 64 * width_multiplier, n, stride=2)
@@ -758,12 +830,24 @@ class ResNetCIFAR(nn.Module):
         self.fc = nn.Linear(self.num_features, self.num_classes)
 
     def make_layer(self, block, planes, num_blocks, stride):
-        blocks = [block(in_planes=self.in_planes, planes=planes, stride=stride)]
+        blocks = [
+            block(
+                in_planes=self.in_planes,
+                planes=planes,
+                stride=stride,
+                down_type=self.down_type,
+            )
+        ]
         self.in_planes = planes * block.expansion
 
         for _ in range(num_blocks - 1):
             blocks.append(
-                block(in_planes=self.in_planes, planes=planes, stride=1)
+                block(
+                    in_planes=self.in_planes,
+                    planes=planes,
+                    stride=1,
+                    down_type=self.down_type,
+                )
             )
 
         return nn.Sequential(*blocks)
@@ -804,7 +888,7 @@ class BasicBlockCIFARPreAct(nn.Module):
 
     expansion = 1
 
-    def __init__(self, in_planes, planes, stride=1):
+    def __init__(self, in_planes, planes, stride=1, down_type="conv"):
         super().__init__()
         self.bn1 = nn.BatchNorm2d(in_planes)
         self.act1 = nn.ReLU()
@@ -819,15 +903,24 @@ class BasicBlockCIFARPreAct(nn.Module):
         )
 
         if stride != 1 or in_planes != self.expansion * planes:
-            self.shortcut = nn.Sequential(
-                nn.Conv2d(
-                    in_planes,
-                    self.expansion * planes,
-                    kernel_size=1,
-                    stride=stride,
-                    bias=False,
+            if down_type == "conv":
+                self.shortcut = nn.Sequential(
+                    nn.Conv2d(
+                        in_planes,
+                        self.expansion * planes,
+                        kernel_size=1,
+                        stride=stride,
+                        bias=False,
+                    )
                 )
-            )
+            elif down_type == "ddu":
+                self.shortcut = nn.Sequential(
+                    AvgPoolShortCut(
+                        stride=stride, out_c=self.expansion * planes, in_c=in_planes
+                    )
+                )
+            else:
+                raise ValueError("Invalid downsample type provided.")
 
     def forward(self, x):
         out = self.act1(self.bn1(x))
@@ -843,7 +936,7 @@ class BottleneckCIFARPreAct(nn.Module):
 
     expansion = 4
 
-    def __init__(self, in_planes, planes, stride=1):
+    def __init__(self, in_planes, planes, stride=1, down_type="conv"):
         super().__init__()
         self.bn1 = nn.BatchNorm2d(in_planes)
         self.act1 = nn.ReLU()
@@ -862,15 +955,24 @@ class BottleneckCIFARPreAct(nn.Module):
         )
 
         if stride != 1 or in_planes != self.expansion * planes:
-            self.shortcut = nn.Sequential(
-                nn.Conv2d(
-                    in_planes,
-                    self.expansion * planes,
-                    kernel_size=1,
-                    stride=stride,
-                    bias=False,
+            if down_type == "conv":
+                self.shortcut = nn.Sequential(
+                    nn.Conv2d(
+                        in_planes,
+                        self.expansion * planes,
+                        kernel_size=1,
+                        stride=stride,
+                        bias=False,
+                    )
                 )
-            )
+            elif down_type == "ddu":
+                self.shortcut = nn.Sequential(
+                    AvgPoolShortCut(
+                        stride=stride, out_c=self.expansion * planes, in_c=in_planes
+                    )
+                )
+            else:
+                raise ValueError("Invalid downsample type provided.")
 
     def forward(self, x):
         out = self.act1(self.bn1(x))
@@ -883,11 +985,20 @@ class BottleneckCIFARPreAct(nn.Module):
 
 
 class ResNetCIFARPreAct(nn.Module):
-    def __init__(self, block, depth, width_multiplier=1, num_classes=10):
+    def __init__(
+        self,
+        block,
+        depth,
+        width_multiplier=1,
+        num_classes=10,
+        down_type="conv",
+        act="relu",
+    ):
         super().__init__()
         self.in_planes = 16
         self.num_classes = num_classes
         self.num_features = 64 * block.expansion * width_multiplier
+        self.down_type = down_type
 
         assert (
             depth - 2
@@ -899,17 +1010,29 @@ class ResNetCIFARPreAct(nn.Module):
         self.layer2 = self.make_layer(block, 32 * width_multiplier, n, stride=2)
         self.layer3 = self.make_layer(block, 64 * width_multiplier, n, stride=2)
         self.bn = nn.BatchNorm2d(self.num_features)
-        self.act = nn.ReLU()
+        self.act = nn.ReLU() if act == "relu" else nn.LeakyReLU()
         self.global_pool = nn.AvgPool2d(kernel_size=8)
         self.fc = nn.Linear(self.num_features, self.num_classes)
 
     def make_layer(self, block, planes, num_blocks, stride):
-        blocks = [block(in_planes=self.in_planes, planes=planes, stride=stride)]
+        blocks = [
+            block(
+                in_planes=self.in_planes,
+                planes=planes,
+                stride=stride,
+                down_type=self.down_type,
+            )
+        ]
         self.in_planes = planes * block.expansion
 
         for _ in range(num_blocks - 1):
             blocks.append(
-                block(in_planes=self.in_planes, planes=planes, stride=1)
+                block(
+                    in_planes=self.in_planes,
+                    planes=planes,
+                    stride=1,
+                    down_type=self.down_type,
+                )
             )
 
         return nn.Sequential(*blocks)
@@ -1942,7 +2065,7 @@ def resnet10t(pretrained=False, **kwargs) -> ResNet:
         layers=[1, 1, 1, 1],
         stem_width=32,
         stem_type="deep_tiered",
-        avg_down=True,
+        down_type="avg",
     )
     return _create_resnet("resnet10t", pretrained, **dict(model_args, **kwargs))
 
@@ -1955,7 +2078,7 @@ def resnet14t(pretrained=False, **kwargs) -> ResNet:
         layers=[1, 1, 1, 1],
         stem_width=32,
         stem_type="deep_tiered",
-        avg_down=True,
+        down_type="avg",
     )
     return _create_resnet("resnet14t", pretrained, **dict(model_args, **kwargs))
 
@@ -1968,35 +2091,58 @@ def resnet18(pretrained=False, **kwargs) -> ResNet:
 
 
 @register_model
-def resnet20_cifar(num_classes=10, **kwargs) -> ResNet:
+def resnet20_cifar(num_classes=10, down_type="conv", act="relu", **kwargs) -> ResNet:
     """Constructs a CIFAR ResNet-20 model."""
-    return ResNetCIFAR(block=BasicBlockCIFAR, depth=20, num_classes=num_classes)
+    return ResNetCIFAR(
+        block=BasicBlockCIFAR,
+        depth=20,
+        num_classes=num_classes,
+        down_type=down_type,
+        act=act,
+    )
 
 
 @register_model
-def resnet20_cifar_preact(num_classes=10, **kwargs) -> ResNet:
+def resnet20_cifar_preact(
+    num_classes=10, down_type="conv", act="relu", **kwargs
+) -> ResNet:
     """Constructs a PreAct CIFAR ResNet-20 model."""
     return ResNetCIFARPreAct(
-        block=BasicBlockCIFARPreAct, depth=20, num_classes=num_classes
+        block=BasicBlockCIFARPreAct,
+        depth=20,
+        num_classes=num_classes,
+        down_type=down_type,
+        act=act,
     )
 
 
 @register_model
-def wide_resnet26_10_cifar(num_classes=10, **kwargs) -> ResNet:
+def wide_resnet26_10_cifar(
+    num_classes=10, down_type="conv", act="relu", **kwargs
+) -> ResNet:
     """Constructs a CIFAR ResNet-26 model."""
     return ResNetCIFAR(
-        block=BasicBlockCIFAR, depth=26, width_multiplier=10, num_classes=num_classes
+        block=BasicBlockCIFAR,
+        depth=26,
+        width_multiplier=10,
+        num_classes=num_classes,
+        down_type=down_type,
+        act=act,
     )
 
 
 @register_model
-def wide_resnet26_10_cifar_preact(num_classes=10, **kwargs) -> ResNet:
+def wide_resnet26_10_cifar_preact(
+    num_classes=10, down_type="conv", act="relu", **kwargs
+) -> ResNet:
     """Constructs a PreAct CIFAR ResNet-26 model."""
     return ResNetCIFARPreAct(
         block=BasicBlockCIFARPreAct,
         depth=26,
         width_multiplier=10,
         num_classes=num_classes,
+        down_type=down_type,
+        act=act,
     )
 
 
@@ -2008,7 +2154,7 @@ def resnet18d(pretrained=False, **kwargs) -> ResNet:
         layers=[2, 2, 2, 2],
         stem_width=32,
         stem_type="deep",
-        avg_down=True,
+        down_type="avg",
     )
     return _create_resnet("resnet18d", pretrained, **dict(model_args, **kwargs))
 
@@ -2021,16 +2167,28 @@ def resnet34(pretrained=False, **kwargs) -> ResNet:
 
 
 @register_model
-def resnet32_cifar(num_classes=10, **kwargs) -> ResNet:
+def resnet32_cifar(num_classes=10, down_type="conv", act="relu", **kwargs) -> ResNet:
     """Constructs a CIFAR ResNet-32 model."""
-    return ResNetCIFAR(block=BasicBlockCIFAR, depth=32, num_classes=num_classes)
+    return ResNetCIFAR(
+        block=BasicBlockCIFAR,
+        depth=32,
+        num_classes=num_classes,
+        down_type=down_type,
+        act=act,
+    )
 
 
 @register_model
-def resnet32_cifar_preact(num_classes=10, **kwargs) -> ResNet:
+def resnet32_cifar_preact(
+    num_classes=10, down_type="conv", act="relu", **kwargs
+) -> ResNet:
     """Constructs a PreAct CIFAR ResNet-32 model."""
     return ResNetCIFARPreAct(
-        block=BasicBlockCIFARPreAct, depth=32, num_classes=num_classes
+        block=BasicBlockCIFARPreAct,
+        depth=32,
+        num_classes=num_classes,
+        down_type=down_type,
+        act=act,
     )
 
 
@@ -2042,7 +2200,7 @@ def resnet34d(pretrained=False, **kwargs) -> ResNet:
         layers=[3, 4, 6, 3],
         stem_width=32,
         stem_type="deep",
-        avg_down=True,
+        down_type="avg",
     )
     return _create_resnet("resnet34d", pretrained, **dict(model_args, **kwargs))
 
@@ -2062,7 +2220,7 @@ def resnet26t(pretrained=False, **kwargs) -> ResNet:
         layers=[2, 2, 2, 2],
         stem_width=32,
         stem_type="deep_tiered",
-        avg_down=True,
+        down_type="avg",
     )
     return _create_resnet("resnet26t", pretrained, **dict(model_args, **kwargs))
 
@@ -2075,7 +2233,7 @@ def resnet26d(pretrained=False, **kwargs) -> ResNet:
         layers=[2, 2, 2, 2],
         stem_width=32,
         stem_type="deep",
-        avg_down=True,
+        down_type="avg",
     )
     return _create_resnet("resnet26d", pretrained, **dict(model_args, **kwargs))
 
@@ -2088,16 +2246,28 @@ def resnet50(pretrained=False, **kwargs) -> ResNet:
 
 
 @register_model
-def resnet50_cifar(num_classes=10, **kwargs) -> ResNet:
+def resnet50_cifar(num_classes=10, down_type="conv", act="relu", **kwargs) -> ResNet:
     """Constructs a CIFAR ResNet-50 model."""
-    return ResNetCIFAR(block=BottleneckCIFAR, depth=50, num_classes=num_classes)
+    return ResNetCIFAR(
+        block=BottleneckCIFAR,
+        depth=50,
+        num_classes=num_classes,
+        down_type=down_type,
+        act=act,
+    )
 
 
 @register_model
-def resnet50_cifar_preact(num_classes=10, **kwargs) -> ResNet:
+def resnet50_cifar_preact(
+    num_classes=10, down_type="conv", act="relu", **kwargs
+) -> ResNet:
     """Constructs a PreAct CIFAR ResNet-50 model."""
     return ResNetCIFARPreAct(
-        block=BottleneckCIFARPreAct, depth=50, num_classes=num_classes
+        block=BottleneckCIFARPreAct,
+        depth=50,
+        num_classes=num_classes,
+        down_type=down_type,
+        act=act,
     )
 
 
@@ -2118,7 +2288,7 @@ def resnet50d(pretrained=False, **kwargs) -> ResNet:
         layers=[3, 4, 6, 3],
         stem_width=32,
         stem_type="deep",
-        avg_down=True,
+        down_type="avg",
     )
     return _create_resnet("resnet50d", pretrained, **dict(model_args, **kwargs))
 
@@ -2140,7 +2310,7 @@ def resnet50t(pretrained=False, **kwargs) -> ResNet:
         layers=[3, 4, 6, 3],
         stem_width=32,
         stem_type="deep_tiered",
-        avg_down=True,
+        down_type="avg",
     )
     return _create_resnet("resnet50t", pretrained, **dict(model_args, **kwargs))
 
@@ -2153,16 +2323,28 @@ def resnet101(pretrained=False, **kwargs) -> ResNet:
 
 
 @register_model
-def resnet110_cifar(num_classes=10, **kwargs) -> ResNet:
+def resnet110_cifar(num_classes=10, down_type="conv", act="relu", **kwargs) -> ResNet:
     """Constructs a CIFAR ResNet-110 model."""
-    return ResNetCIFAR(block=BottleneckCIFAR, depth=110, num_classes=num_classes)
+    return ResNetCIFAR(
+        block=BottleneckCIFAR,
+        depth=110,
+        num_classes=num_classes,
+        down_type=down_type,
+        act=act,
+    )
 
 
 @register_model
-def resnet110_cifar_preact(num_classes=10, **kwargs) -> ResNet:
+def resnet110_cifar_preact(
+    num_classes=10, down_type="conv", act="relu", **kwargs
+) -> ResNet:
     """Constructs a PreAct CIFAR ResNet-110 model."""
     return ResNetCIFARPreAct(
-        block=BottleneckCIFARPreAct, depth=110, num_classes=num_classes
+        block=BottleneckCIFARPreAct,
+        depth=110,
+        num_classes=num_classes,
+        down_type=down_type,
+        act=act,
     )
 
 
@@ -2183,7 +2365,7 @@ def resnet101d(pretrained=False, **kwargs) -> ResNet:
         layers=[3, 4, 23, 3],
         stem_width=32,
         stem_type="deep",
-        avg_down=True,
+        down_type="avg",
     )
     return _create_resnet("resnet101d", pretrained, **dict(model_args, **kwargs))
 
@@ -2205,16 +2387,28 @@ def resnet152(pretrained=False, **kwargs) -> ResNet:
 
 
 @register_model
-def resnet152_cifar(num_classes=10, **kwargs) -> ResNet:
+def resnet152_cifar(num_classes=10, down_type="conv", act="relu", **kwargs) -> ResNet:
     """Constructs a CIFAR ResNet-152 model."""
-    return ResNetCIFAR(block=BottleneckCIFAR, depth=152, num_classes=num_classes)
+    return ResNetCIFAR(
+        block=BottleneckCIFAR,
+        depth=152,
+        num_classes=num_classes,
+        down_type=down_type,
+        act=act,
+    )
 
 
 @register_model
-def resnet152_cifar_preact(num_classes=10, **kwargs) -> ResNet:
+def resnet152_cifar_preact(
+    num_classes=10, down_type="conv", act="relu", **kwargs
+) -> ResNet:
     """Constructs a PreAct CIFAR ResNet-152 model."""
     return ResNetCIFARPreAct(
-        block=BottleneckCIFARPreAct, depth=152, num_classes=num_classes
+        block=BottleneckCIFARPreAct,
+        depth=152,
+        num_classes=num_classes,
+        down_type=down_type,
+        act=act,
     )
 
 
@@ -2235,7 +2429,7 @@ def resnet152d(pretrained=False, **kwargs) -> ResNet:
         layers=[3, 8, 36, 3],
         stem_width=32,
         stem_type="deep",
-        avg_down=True,
+        down_type="avg",
     )
     return _create_resnet("resnet152d", pretrained, **dict(model_args, **kwargs))
 
@@ -2264,7 +2458,7 @@ def resnet200d(pretrained=False, **kwargs) -> ResNet:
         layers=[3, 24, 36, 3],
         stem_width=32,
         stem_type="deep",
-        avg_down=True,
+        down_type="avg",
     )
     return _create_resnet("resnet200d", pretrained, **dict(model_args, **kwargs))
 
@@ -2318,7 +2512,7 @@ def resnext50d_32x4d(pretrained=False, **kwargs) -> ResNet:
         base_width=4,
         stem_width=32,
         stem_type="deep",
-        avg_down=True,
+        down_type="avg",
     )
     return _create_resnet("resnext50d_32x4d", pretrained, **dict(model_args, **kwargs))
 
@@ -2379,7 +2573,7 @@ def ecaresnet26t(pretrained=False, **kwargs) -> ResNet:
         layers=[2, 2, 2, 2],
         stem_width=32,
         stem_type="deep_tiered",
-        avg_down=True,
+        down_type="avg",
         block_args=dict(attn_layer="eca"),
     )
     return _create_resnet("ecaresnet26t", pretrained, **dict(model_args, **kwargs))
@@ -2393,7 +2587,7 @@ def ecaresnet50d(pretrained=False, **kwargs) -> ResNet:
         layers=[3, 4, 6, 3],
         stem_width=32,
         stem_type="deep",
-        avg_down=True,
+        down_type="avg",
         block_args=dict(attn_layer="eca"),
     )
     return _create_resnet("ecaresnet50d", pretrained, **dict(model_args, **kwargs))
@@ -2409,7 +2603,7 @@ def ecaresnet50d_pruned(pretrained=False, **kwargs) -> ResNet:
         layers=[3, 4, 6, 3],
         stem_width=32,
         stem_type="deep",
-        avg_down=True,
+        down_type="avg",
         block_args=dict(attn_layer="eca"),
     )
     return _create_resnet(
@@ -2427,7 +2621,7 @@ def ecaresnet50t(pretrained=False, **kwargs) -> ResNet:
         layers=[3, 4, 6, 3],
         stem_width=32,
         stem_type="deep_tiered",
-        avg_down=True,
+        down_type="avg",
         block_args=dict(attn_layer="eca"),
     )
     return _create_resnet("ecaresnet50t", pretrained, **dict(model_args, **kwargs))
@@ -2440,7 +2634,7 @@ def ecaresnetlight(pretrained=False, **kwargs) -> ResNet:
         block=Bottleneck,
         layers=[1, 1, 11, 3],
         stem_width=32,
-        avg_down=True,
+        down_type="avg",
         block_args=dict(attn_layer="eca"),
     )
     return _create_resnet("ecaresnetlight", pretrained, **dict(model_args, **kwargs))
@@ -2454,7 +2648,7 @@ def ecaresnet101d(pretrained=False, **kwargs) -> ResNet:
         layers=[3, 4, 23, 3],
         stem_width=32,
         stem_type="deep",
-        avg_down=True,
+        down_type="avg",
         block_args=dict(attn_layer="eca"),
     )
     return _create_resnet("ecaresnet101d", pretrained, **dict(model_args, **kwargs))
@@ -2470,7 +2664,7 @@ def ecaresnet101d_pruned(pretrained=False, **kwargs) -> ResNet:
         layers=[3, 4, 23, 3],
         stem_width=32,
         stem_type="deep",
-        avg_down=True,
+        down_type="avg",
         block_args=dict(attn_layer="eca"),
     )
     return _create_resnet(
@@ -2486,7 +2680,7 @@ def ecaresnet200d(pretrained=False, **kwargs) -> ResNet:
         layers=[3, 24, 36, 3],
         stem_width=32,
         stem_type="deep",
-        avg_down=True,
+        down_type="avg",
         block_args=dict(attn_layer="eca"),
     )
     return _create_resnet("ecaresnet200d", pretrained, **dict(model_args, **kwargs))
@@ -2500,7 +2694,7 @@ def ecaresnet269d(pretrained=False, **kwargs) -> ResNet:
         layers=[3, 30, 48, 8],
         stem_width=32,
         stem_type="deep",
-        avg_down=True,
+        down_type="avg",
         block_args=dict(attn_layer="eca"),
     )
     return _create_resnet("ecaresnet269d", pretrained, **dict(model_args, **kwargs))
@@ -2519,7 +2713,7 @@ def ecaresnext26t_32x4d(pretrained=False, **kwargs) -> ResNet:
         base_width=4,
         stem_width=32,
         stem_type="deep_tiered",
-        avg_down=True,
+        down_type="avg",
         block_args=dict(attn_layer="eca"),
     )
     return _create_resnet(
@@ -2540,7 +2734,7 @@ def ecaresnext50t_32x4d(pretrained=False, **kwargs) -> ResNet:
         base_width=4,
         stem_width=32,
         stem_type="deep_tiered",
-        avg_down=True,
+        down_type="avg",
         block_args=dict(attn_layer="eca"),
     )
     return _create_resnet(
@@ -2579,7 +2773,7 @@ def seresnet50t(pretrained=False, **kwargs) -> ResNet:
         layers=[3, 4, 6, 3],
         stem_width=32,
         stem_type="deep_tiered",
-        avg_down=True,
+        down_type="avg",
         block_args=dict(attn_layer="se"),
     )
     return _create_resnet("seresnet50t", pretrained, **dict(model_args, **kwargs))
@@ -2608,7 +2802,7 @@ def seresnet152d(pretrained=False, **kwargs) -> ResNet:
         layers=[3, 8, 36, 3],
         stem_width=32,
         stem_type="deep",
-        avg_down=True,
+        down_type="avg",
         block_args=dict(attn_layer="se"),
     )
     return _create_resnet("seresnet152d", pretrained, **dict(model_args, **kwargs))
@@ -2622,7 +2816,7 @@ def seresnet200d(pretrained=False, **kwargs) -> ResNet:
         layers=[3, 24, 36, 3],
         stem_width=32,
         stem_type="deep",
-        avg_down=True,
+        down_type="avg",
         block_args=dict(attn_layer="se"),
     )
     return _create_resnet("seresnet200d", pretrained, **dict(model_args, **kwargs))
@@ -2636,7 +2830,7 @@ def seresnet269d(pretrained=False, **kwargs) -> ResNet:
         layers=[3, 30, 48, 8],
         stem_width=32,
         stem_type="deep",
-        avg_down=True,
+        down_type="avg",
         block_args=dict(attn_layer="se"),
     )
     return _create_resnet("seresnet269d", pretrained, **dict(model_args, **kwargs))
@@ -2655,7 +2849,7 @@ def seresnext26d_32x4d(pretrained=False, **kwargs) -> ResNet:
         base_width=4,
         stem_width=32,
         stem_type="deep",
-        avg_down=True,
+        down_type="avg",
         block_args=dict(attn_layer="se"),
     )
     return _create_resnet(
@@ -2676,7 +2870,7 @@ def seresnext26t_32x4d(pretrained=False, **kwargs) -> ResNet:
         base_width=4,
         stem_width=32,
         stem_type="deep_tiered",
-        avg_down=True,
+        down_type="avg",
         block_args=dict(attn_layer="se"),
     )
     return _create_resnet(
@@ -2742,7 +2936,7 @@ def seresnext101d_32x8d(pretrained=False, **kwargs) -> ResNet:
         base_width=8,
         stem_width=32,
         stem_type="deep",
-        avg_down=True,
+        down_type="avg",
         block_args=dict(attn_layer="se"),
     )
     return _create_resnet(
@@ -2802,7 +2996,7 @@ def resnetblur50d(pretrained=False, **kwargs) -> ResNet:
         aa_layer=BlurPool2d,
         stem_width=32,
         stem_type="deep",
-        avg_down=True,
+        down_type="avg",
     )
     return _create_resnet("resnetblur50d", pretrained, **dict(model_args, **kwargs))
 
@@ -2816,7 +3010,7 @@ def resnetblur101d(pretrained=False, **kwargs) -> ResNet:
         aa_layer=BlurPool2d,
         stem_width=32,
         stem_type="deep",
-        avg_down=True,
+        down_type="avg",
     )
     return _create_resnet("resnetblur101d", pretrained, **dict(model_args, **kwargs))
 
@@ -2830,7 +3024,7 @@ def resnetaa34d(pretrained=False, **kwargs) -> ResNet:
         aa_layer=nn.AvgPool2d,
         stem_width=32,
         stem_type="deep",
-        avg_down=True,
+        down_type="avg",
     )
     return _create_resnet("resnetaa34d", pretrained, **dict(model_args, **kwargs))
 
@@ -2851,7 +3045,7 @@ def resnetaa50d(pretrained=False, **kwargs) -> ResNet:
         aa_layer=nn.AvgPool2d,
         stem_width=32,
         stem_type="deep",
-        avg_down=True,
+        down_type="avg",
     )
     return _create_resnet("resnetaa50d", pretrained, **dict(model_args, **kwargs))
 
@@ -2865,7 +3059,7 @@ def resnetaa101d(pretrained=False, **kwargs) -> ResNet:
         aa_layer=nn.AvgPool2d,
         stem_width=32,
         stem_type="deep",
-        avg_down=True,
+        down_type="avg",
     )
     return _create_resnet("resnetaa101d", pretrained, **dict(model_args, **kwargs))
 
@@ -2879,7 +3073,7 @@ def seresnetaa50d(pretrained=False, **kwargs) -> ResNet:
         aa_layer=nn.AvgPool2d,
         stem_width=32,
         stem_type="deep",
-        avg_down=True,
+        down_type="avg",
         block_args=dict(attn_layer="se"),
     )
     return _create_resnet("seresnetaa50d", pretrained, **dict(model_args, **kwargs))
@@ -2895,7 +3089,7 @@ def seresnextaa101d_32x8d(pretrained=False, **kwargs) -> ResNet:
         base_width=8,
         stem_width=32,
         stem_type="deep",
-        avg_down=True,
+        down_type="avg",
         aa_layer=nn.AvgPool2d,
         block_args=dict(attn_layer="se"),
     )
@@ -2914,7 +3108,7 @@ def seresnextaa201d_32x8d(pretrained=False, **kwargs):
         base_width=8,
         stem_width=64,
         stem_type="deep",
-        avg_down=True,
+        down_type="avg",
         aa_layer=nn.AvgPool2d,
         block_args=dict(attn_layer="se"),
     )
@@ -2936,7 +3130,7 @@ def resnetrs50(pretrained=False, **kwargs) -> ResNet:
         stem_width=32,
         stem_type="deep",
         replace_stem_pool=True,
-        avg_down=True,
+        down_type="avg",
         block_args=dict(attn_layer=attn_layer),
     )
     return _create_resnet("resnetrs50", pretrained, **dict(model_args, **kwargs))
@@ -2955,7 +3149,7 @@ def resnetrs101(pretrained=False, **kwargs) -> ResNet:
         stem_width=32,
         stem_type="deep",
         replace_stem_pool=True,
-        avg_down=True,
+        down_type="avg",
         block_args=dict(attn_layer=attn_layer),
     )
     return _create_resnet("resnetrs101", pretrained, **dict(model_args, **kwargs))
@@ -2974,7 +3168,7 @@ def resnetrs152(pretrained=False, **kwargs) -> ResNet:
         stem_width=32,
         stem_type="deep",
         replace_stem_pool=True,
-        avg_down=True,
+        down_type="avg",
         block_args=dict(attn_layer=attn_layer),
     )
     return _create_resnet("resnetrs152", pretrained, **dict(model_args, **kwargs))
@@ -2993,7 +3187,7 @@ def resnetrs200(pretrained=False, **kwargs) -> ResNet:
         stem_width=32,
         stem_type="deep",
         replace_stem_pool=True,
-        avg_down=True,
+        down_type="avg",
         block_args=dict(attn_layer=attn_layer),
     )
     return _create_resnet("resnetrs200", pretrained, **dict(model_args, **kwargs))
@@ -3012,7 +3206,7 @@ def resnetrs270(pretrained=False, **kwargs) -> ResNet:
         stem_width=32,
         stem_type="deep",
         replace_stem_pool=True,
-        avg_down=True,
+        down_type="avg",
         block_args=dict(attn_layer=attn_layer),
     )
     return _create_resnet("resnetrs270", pretrained, **dict(model_args, **kwargs))
@@ -3031,7 +3225,7 @@ def resnetrs350(pretrained=False, **kwargs) -> ResNet:
         stem_width=32,
         stem_type="deep",
         replace_stem_pool=True,
-        avg_down=True,
+        down_type="avg",
         block_args=dict(attn_layer=attn_layer),
     )
     return _create_resnet("resnetrs350", pretrained, **dict(model_args, **kwargs))
@@ -3050,7 +3244,7 @@ def resnetrs420(pretrained=False, **kwargs) -> ResNet:
         stem_width=32,
         stem_type="deep",
         replace_stem_pool=True,
-        avg_down=True,
+        down_type="avg",
         block_args=dict(attn_layer=attn_layer),
     )
     return _create_resnet("resnetrs420", pretrained, **dict(model_args, **kwargs))

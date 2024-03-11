@@ -42,7 +42,7 @@ class DeepEnsembleWrapper(PosteriorWrapper):
             del self.model
             model_name = self.weight_paths[index]
             self.model = self.create_entrypoint(model_name)
-    
+
     def create_entrypoint(self, model_name: str):
         kwargs = {k: v for k, v in self.kwargs.items() if v is not None}
         pretrained_cfg = None
@@ -71,8 +71,9 @@ class DeepEnsembleWrapper(PosteriorWrapper):
                 pretrained_cfg=pretrained_cfg,
                 **kwargs,
             )
-        
+
         return model
+
 
 def parse_model_name(model_name: str):
     if model_name.startswith("hf_hub"):

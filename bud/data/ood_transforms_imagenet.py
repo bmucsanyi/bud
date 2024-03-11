@@ -284,12 +284,12 @@ def frost(x, severity=1, rng=None):
     c = [(1, 0.4), (0.8, 0.6), (0.7, 0.7), (0.65, 0.7), (0.6, 0.75)][severity - 1]
     idx = rng.integers(5)
     filename = [
-        "timm/data/frost1.png",
-        "timm/data/frost2.png",
-        "timm/data/frost3.png",
-        "timm/data/frost4.jpg",
-        "timm/data/frost5.jpg",
-        "timm/data/frost6.jpg",
+        "bud/data/frost1.png",
+        "bud/data/frost2.png",
+        "bud/data/frost3.png",
+        "bud/data/frost4.jpg",
+        "bud/data/frost5.jpg",
+        "bud/data/frost6.jpg",
     ][idx]
     frost = cv2.imread(filename)
     # randomly crop and convert to rgb
@@ -539,7 +539,7 @@ OOD_TRANSFORM_DICT_IMAGENET = {
     "shot_noise": shot_noise,
     "impulse_noise": impulse_noise,
     "defocus_blur": defocus_blur,
-    "frosted_glass_blur": frosted_glass_blur,  # 
+    "frosted_glass_blur": frosted_glass_blur,  #
     "motion_blur": motion_blur,
     "zoom_blur": zoom_blur,
     "snow": snow,

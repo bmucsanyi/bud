@@ -11,4 +11,4 @@ from .fbar_cross_entropy_loss import FBarCrossEntropyLoss
 from .jsd_loss import JsdCrossEntropyLoss
 from .mcinfonce_loss import MCInfoNCELoss
 from .nivmf_loss import NonIsotropicVMFLoss
-from .risk_prediction_loss import RiskPredictionLoss
+from .loss_prediction_loss import LossPredictionLoss

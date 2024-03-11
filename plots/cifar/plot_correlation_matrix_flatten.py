@@ -1,4 +1,3 @@
-import os
 import matplotlib.pyplot as plt
 
 import numpy as np
@@ -7,6 +6,15 @@ import wandb
 
 from tueplots import bundles
 from scipy.stats import spearmanr
+import sys
+import json
+
+sys.path.insert(0, "..")
+
+from utils import (
+    ESTIMATOR_CONVERSION_DICT,
+    create_directory,
+)
 
 plt.rcParams.update(
     bundles.icml2022(family="serif", usetex=True, nrows=1, column="half")
@@ -15,46 +23,15 @@ plt.rcParams.update(
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
 
 
-def create_directory(path):
-    """Creates a directory if it does not exist."""
-    if not os.path.exists(path):
-        os.makedirs(path)
-
-
-ESTIMATOR_CONVERSION_DICT = {
-    "entropies_of_fbar": r"$\mathbb{H}(\bar{f})$",
-    "entropies_of_bma": r"$\text{PU}^\text{it}$",
-    "expected_entropies": r"$\text{AU}^\text{it}$",
-    "expected_entropies_plus_expected_divergences": r"$\text{AU}^\text{it} + \text{EU}^\text{b}$",
-    "one_minus_max_probs_of_fbar": r"$\max \bar{f}$",
-    "one_minus_max_probs_of_bma": r"$\max \tilde{f}$",
-    "one_minus_expected_max_probs": r"$\mathbb{E}\left[\max f\right]$",
-    "expected_divergences": r"$\text{EU}^\text{b}$",
-    "jensen_shannon_divergences": r"$\text{EU}^\text{it}$",
-    "error_probabilities": r"$u^\text{cp}$",
-    "duq_values": r"$u^\text{duq}$",
-    "mahalanobis_values": r"$u^\text{mah}$",
-    "risk_values": r"$u^\text{rp}$",
-    "hard_bma_accuracy": None,
-}
-
-
 def main():
-    wandb.login(key="341d19ab018aff60423f1ea0049fa41553ef94b4")
-    api = wandb.Api()
+    # Add accuracy to estimator dict
+    ESTIMATOR_CONVERSION_DICT["hard_bma_accuracy"] = "none"
 
-    id_to_method = {
-        "2vkuhe38": "GP",
-        "3vnnnaix": "HET-XL",
-        "gypg5gc8": "Baseline",
-        "9jztoaos": "Dropout",
-        "f32n7c05": "SNGP",
-        "03coev3u": "DUQ",
-        "6r8nfwqc": "Shallow Ensemble",
-        "xsvl0zop": "Correctness Prediction",
-        "ymq2jv64": "Deep Ensemble",
-        "gkvfnbup": "Laplace",
-    }
+    with open("../../wandb_key.json") as f:
+        wandb_key = json.load(f)["key"]
+
+    wandb.login(key=wandb_key)
+    api = wandb.Api()
 
     create_directory("results")
     create_directory(f"results/correlation_matrix")
@@ -68,6 +45,19 @@ def main():
         "hard_bma_accuracy": "Accuracy",
         "rank_correlation_bregman_au": "Aleatoric",
         "auroc_oodness": "OOD (*)",
+    }
+
+    id_to_method = {
+        "2vkuhe38": "GP",
+        "3vnnnaix": "HET-XL",
+        "gypg5gc8": "Baseline",
+        "9jztoaos": "Dropout",
+        "f32n7c05": "SNGP",
+        "03coev3u": "DUQ",
+        "6r8nfwqc": "Shallow Ens.",
+        "xsvl0zop": "Corr. Pred.",
+        "ymq2jv64": "Deep Ens.",
+        "gkvfnbup": "Laplace",
     }
 
     fig, ax = plt.subplots()
@@ -94,6 +84,8 @@ def main():
                 estimator_dict = {}
 
                 for run in sweep.runs:
+                    if run.state != "finished":
+                        continue
                     for key in sorted(run.summary.keys()):
                         if key.startswith(prefix) and key.endswith(metric_id):
                             stripped_key = key.replace(f"{prefix}_", "").replace(
@@ -103,6 +95,7 @@ def main():
                             if (
                                 "mixed" in stripped_key
                                 or stripped_key not in ESTIMATOR_CONVERSION_DICT
+                                or "gt" in stripped_key
                             ):
                                 continue
 
@@ -117,11 +110,10 @@ def main():
                 for key in tuple(estimator_dict.keys()):
                     if "NaN" in estimator_dict[key]:
                         continue
-
                     estimator_dict[key] = np.mean(estimator_dict[key])
 
                 if len(estimator_dict) > 1:
-                    if method_name == "Correctness Prediction":
+                    if method_name == "Corr. Pred.":
                         estimator = "error_probabilities"
                     elif method_name == "DUQ":
                         estimator = "duq_values"

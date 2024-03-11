@@ -32,6 +32,7 @@ import torch.nn.functional as F
 import torchvision.utils
 import yaml
 from torch.nn.parallel import DistributedDataParallel as NativeDDP
+import json
 
 from bud import utils
 from bud.data import (
@@ -54,7 +55,7 @@ from bud.losses import (
     LabelSmoothingCrossEntropyLoss,
     MCInfoNCELoss,
     NonIsotropicVMFLoss,
-    RiskPredictionLoss,
+    LossPredictionLoss,
     SoftTargetCrossEntropyLoss,
 )
 from bud.models import (
@@ -67,7 +68,9 @@ from bud.optimizers import create_optimizer_v2, optimizer_kwargs
 from bud.schedulers import create_scheduler_v2, scheduler_kwargs
 from bud.utils import ApexScaler, NativeScaler, type_from_string
 from bud.wrappers import (
+    TemperatureWrapper,
     DUQWrapper,
+    DDUWrapper,
     LaplaceWrapper,
     MahalanobisWrapper,
     MCInfoNCEWrapper,
@@ -229,6 +232,15 @@ group.add_argument(
     help=(
         "maximum number of samples in concatenated ID + OOD train dataset in the "
         "Mahalanobis method (default: 100000)"
+    ),
+)
+group.add_argument(
+    "--max-num-id-train-samples",
+    default=100000,
+    type=int,
+    help=(
+        "maximum number of samples in (truncated) train dataset for the "
+        "DDU method (default: 100000)"
     ),
 )
 group.add_argument(
@@ -412,6 +424,24 @@ group.add_argument(
     help="whether to use only a last layer Laplace approximation (default: False)",
 )
 group.add_argument(
+    "--pred-type",
+    default="glm",
+    type=str,
+    help='prediction type used by Laplace (default: "glm")',
+)
+group.add_argument(
+    "--prior-optimization-method",
+    default="CV",
+    type=str,
+    help='prior optimization method used by Laplace (default: "CV")',
+)
+group.add_argument(
+    "--hessian-structure",
+    default="kron",
+    type=str,
+    help='Hessian structure method used by Laplace (default: "kron")',
+)
+group.add_argument(
     "--magnitude",
     default=0.001,
     type=float,
@@ -520,6 +550,15 @@ group.add_argument(
     default=False,
     help="whether to reset the classifier layer before training (default: False)",
 )
+group.add_argument(
+    "--is-temperature-scaled",
+    action="store_true",
+    default=False,
+    help=(
+        "whether to use temperature scaling for the Temperature and DDU methods "
+        "(default: False)"
+    ),
+)
 
 # Loss parameters
 group = parser.add_argument_group("Loss parameters")
@@ -535,7 +574,7 @@ group.add_argument(
     type=float,
     help=(
         "multiplier of the uncertainty loss when calculating the total loss for the "
-        "correctness and risk prediction methods (default: 0.01)"
+        "correctness and loss prediction methods (default: 0.01)"
     ),
 )
 group.add_argument(
@@ -553,7 +592,7 @@ group.add_argument(
     default=False,
     help=(
         "whether to detach the task loss before calculating the uncertainty loss in the "
-        "risk prediction method (default: False)"
+        "loss prediction method (default: False)"
     ),
 )
 
@@ -746,7 +785,7 @@ group.add_argument(
     action="store_true",
     help="enable experimental fast-norm",
 )
-group.add_argument("--model-kwargs", nargs="*", default={}, action=utils.ParseKwargs)
+group.add_argument("--model-kwargs", default={}, action=utils.ParseKwargs, type=str)
 
 # Scripting / codegen
 scripting_group = group.add_mutually_exclusive_group()
@@ -1362,7 +1401,7 @@ group.add_argument(
     "--decreasing",
     action="store_true",
     default=False,
-    help=("whether eval-metric is decreasing (default: False)"),
+    help="whether eval-metric is decreasing (default: False)",
 )
 group.add_argument("--local-rank", default=0, type=int)
 group.add_argument(
@@ -1383,7 +1422,7 @@ group.add_argument(
 group.add_argument(
     "--wandb-key",
     type=str,
-    default="341d19ab018aff60423f1ea0049fa41553ef94b4",
+    default="",
     help="wandb API key",
 )
 
@@ -1453,6 +1492,10 @@ def main():
 
     if utils.is_primary(args) and args.log_wandb:
         if has_wandb:
+            if not args.wandb_key:
+                with open("wandb_key.json") as f:
+                    args.wandb_key = json.load(f)["key"]
+
             os.environ["WANDB_API_KEY"] = args.wandb_key
             wandb.init(project="bias", name=args.experiment, config=args)
         else:
@@ -1512,6 +1555,9 @@ def main():
         matrix_rank=args.matrix_rank,
         temperature=args.temperature,
         is_last_layer_laplace=args.is_last_layer_laplace,
+        pred_type=args.pred_type,
+        prior_optimization_method=args.prior_optimization_method,
+        hessian_structure=args.hessian_structure,
         magnitude=args.magnitude,
         initial_average_kappa=args.initial_average_kappa,
         num_heads=args.num_heads,
@@ -1724,6 +1770,19 @@ def main():
         is_training=False,
     )
 
+    dataset_id_eval_hard = create_dataset(
+        name=args.dataset_id,
+        root=args.data_dir_id,
+        label_root=args.soft_imagenet_label_dir,
+        is_evaluate_on_all_splits_id=args.is_evaluate_on_all_splits_id,
+        split=args.val_split,
+        download=args.dataset_download,
+        class_map=args.class_map,
+        batch_size=args.batch_size,
+        is_training=False,
+    )
+    dataset_id_eval_hard.target_transform = lambda target: target.argmax(-1)
+
     if args.ood_transforms_eval:
         dataset_locations_ood_eval = {}
         for severity in range(1, 6):
@@ -1886,6 +1945,23 @@ def main():
         device=device,
     )
 
+    loader_id_eval_hard = create_loader(
+        dataset_id_eval_hard,
+        dataset_name=args.dataset_id,
+        input_size=data_config["input_size"],
+        batch_size=args.validation_batch_size or args.batch_size,
+        is_training=False,
+        use_prefetcher=args.prefetcher,
+        interpolation=data_config["interpolation"],
+        mean=data_config["mean"],
+        std=data_config["std"],
+        num_workers=num_eval_workers,
+        distributed=args.distributed,
+        crop_pct=data_config["crop_pct"],
+        pin_memory=args.pin_mem,
+        device=device,
+    )
+
     if args.ood_transforms_eval:
         loaders_ood_eval = {}
         for name, (dataset, num_workers) in datasets_ood_eval.items():
@@ -2014,8 +2090,8 @@ def main():
         train_loss_fn = MCInfoNCELoss(args.kappa_pos, args.num_mc_samples)
     elif args.loss == "non-isotropic-vmf":
         train_loss_fn = NonIsotropicVMFLoss()
-    elif args.loss == "risk-prediction":
-        train_loss_fn = RiskPredictionLoss(
+    elif args.loss == "loss-prediction":
+        train_loss_fn = LossPredictionLoss(
             args.lambda_uncertainty_loss, args.is_detach, args.freeze_backbone
         )
     else:
@@ -2137,7 +2213,7 @@ def main():
                 update_post_hoc_method(
                     model,
                     loader_train,
-                    loader_id_eval,
+                    loader_id_eval_hard,
                     loaders_ood_eval[f"{args.dataset_id}S2"],
                     args,
                 )
@@ -2169,6 +2245,17 @@ def main():
             if args.is_evaluate_on_test_sets and (
                 (args.lr > 0 and epoch == num_epochs) or (args.lr == 0 and epoch == 0)
             ):
+                model.eval()
+
+                if isinstance(model, DDUWrapper):
+                    model.fit_gmm(loader_train, args.max_num_id_train_samples)
+
+                if (
+                    isinstance(model, (DDUWrapper, TemperatureWrapper))
+                    and args.is_temperature_scaled
+                ):
+                    model.set_temperature_loader(loader_id_eval_hard)
+
                 logger.info(f"Testing best model at epoch {epoch}.")
                 # Only for the best model track the test scores
                 best_test_metrics = evaluate(
@@ -2461,25 +2548,24 @@ def calc_gradient_penalty(x, pred):
     return gradient_penalty
 
 
-def update_post_hoc_method(model, loader_train, loader_id_eval, loader_ood_eval, args):
+def update_post_hoc_method(
+    model, loader_train, loader_id_eval_hard, loader_ood_eval, args
+):
     if isinstance(model, LaplaceWrapper):
         assert (
-            loader_id_eval is not None
+            loader_id_eval_hard is not None
         ), "For Laplace approximation, the ID eval loader has to be specified."
         model.eval()
-        loader_id_eval_hard = deepcopy(loader_id_eval)
-        loader_id_eval_hard.target_transform = lambda target: target.argmax(dim=-1)
         model.perform_laplace_approximation(loader_train, loader_id_eval_hard)
-
-    if isinstance(model, MahalanobisWrapper):
+    elif isinstance(model, MahalanobisWrapper):
         assert (
-            loader_id_eval is not None and loader_ood_eval is not None
+            loader_id_eval_hard is not None and loader_ood_eval is not None
         ), "For the Mahalanobis method, the ID and OOD eval loaders have to be specified."
         torch.set_grad_enabled(mode=False)
         model.eval()
         model.train_logistic_regressor(
             loader_train,
-            loader_id_eval,
+            loader_id_eval_hard,
             loader_ood_eval,
             args.max_num_covariance_samples,
             args.max_num_id_ood_train_samples,

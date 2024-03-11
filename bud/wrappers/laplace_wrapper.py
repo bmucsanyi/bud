@@ -26,6 +26,9 @@ class LaplaceWrapper(PosteriorWrapper):
         num_mc_samples: int,
         weight_path: str,
         is_last_layer_laplace: bool,
+        pred_type: str,  # "glm", "nn"
+        prior_optimization_method: str,  # "marglik", "CV"
+        hessian_structure: str,  # "kron", "full"
     ):
         super().__init__(model)
 
@@ -33,6 +36,9 @@ class LaplaceWrapper(PosteriorWrapper):
         self.weight_path = weight_path
         self.laplace_model = None
         self.is_last_layer_laplace = is_last_layer_laplace
+        self.pred_type = pred_type
+        self.prior_optimization_method = prior_optimization_method
+        self.hessian_structure = hessian_structure
 
         self.load_model()
 
@@ -49,11 +55,11 @@ class LaplaceWrapper(PosteriorWrapper):
             self.model,
             "classification",
             subset_of_weights=subset_of_weights,
-            hessian_structure="kron",
+            hessian_structure=self.hessian_structure,
         )
         self.laplace_model.fit(train_loader)
         self.laplace_model.optimize_prior_precision(
-            method="marglik", val_loader=val_loader
+            method=self.prior_optimization_method, val_loader=val_loader
         )
 
     def forward_head(self, *args, **kwargs):
@@ -72,9 +78,10 @@ class LaplaceWrapper(PosteriorWrapper):
         else:
             return {
                 "logit": self.laplace_model.predictive_samples(
-                    x=inputs, pred_type="nn", n_samples=self.num_mc_samples
+                    x=inputs, pred_type=self.pred_type, n_samples=self.num_mc_samples
                 )
                 .log()
+                .clamp(min=1e-10)
                 .permute(1, 0, 2),  # [B, S, C]
                 "feature": self.model.forward_head(
                     self.model.forward_features(inputs), pre_logits=True

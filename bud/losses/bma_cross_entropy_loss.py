@@ -10,8 +10,6 @@ class BMACrossEntropyLoss(nn.Module):
         self.eps = 1e-10
 
     def forward(self, logits, targets):
-        log_probs = (
-            F.softmax(logits, dim=-1).mean(dim=1).add(self.eps).log()
-        )  # [B, C]
+        log_probs = F.softmax(logits, dim=-1).mean(dim=1).add(self.eps).log()  # [B, C]
 
         return self.ce_loss(log_probs, targets)

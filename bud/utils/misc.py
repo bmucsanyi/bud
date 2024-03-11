@@ -26,17 +26,34 @@ def add_bool_arg(parser, name, default=False, help=""):
     parser.set_defaults(**{dest_name: default})
 
 
+# class ParseKwargs(argparse.Action):
+#     def __call__(self, parser, namespace, values, option_string=None):
+#         kw = {}
+#         for value in values:
+#             key, value = value.split("=")
+#             try:
+#                 kw[key] = ast.literal_eval(value)
+#             except ValueError:
+#                 kw[key] = str(
+#                     value
+#                 )  # fallback to string (avoid need to escape on command line)
+#         setattr(namespace, self.dest, kw)
+
+
 class ParseKwargs(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
         kw = {}
-        for value in values:
-            key, value = value.split("=")
+        # Split the string on spaces to get each key-value pair
+        pairs = values.split(" ")
+        for pair in pairs:
+            # Split each pair on "=" to separate keys and values
+            key, value = pair.split("=", 1)
             try:
+                # Attempt to parse the value into a Python object
                 kw[key] = ast.literal_eval(value)
             except ValueError:
-                kw[key] = str(
-                    value
-                )  # fallback to string (avoid need to escape on command line)
+                # Keep the value as a string if parsing fails
+                kw[key] = value
         setattr(namespace, self.dest, kw)
 
 

@@ -1,4 +1,4 @@
-"""Direct risk prediction implementation as a wrapper class"""
+"""Direct loss prediction implementation as a wrapper class"""
 
 import re
 
@@ -9,7 +9,7 @@ from bud.utils import NonNegativeRegressor
 from bud.wrappers.model_wrapper import SpecialWrapper
 
 
-class BaseRiskPredictionWrapper(SpecialWrapper):
+class BaseLossPredictionWrapper(SpecialWrapper):
     pass
 
 
@@ -40,9 +40,9 @@ class EmbeddingNetwork(nn.Module):
         return x
 
 
-class DeepRiskPredictionWrapper(BaseRiskPredictionWrapper):
+class DeepLossPredictionWrapper(BaseLossPredictionWrapper):
     """
-    This module takes a model as input and creates a deep risk prediction module from it.
+    This module takes a model as input and creates a deep loss prediction module from it.
     """
 
     def __init__(
@@ -217,15 +217,15 @@ class DeepRiskPredictionWrapper(BaseRiskPredictionWrapper):
             dim=1,
         )
 
-        risk_values = self.regressor(regressor_features).squeeze()
+        loss_values = self.regressor(regressor_features).squeeze()
 
         if self.training:
-            return logits, risk_values
+            return logits, loss_values
         else:
             return {
                 "logit": logits,
                 "feature": features,
-                "risk_value": risk_values,
+                "risk_value": loss_values,
             }
 
 
@@ -238,9 +238,9 @@ class AveragePool(nn.Module):
         return inputs.mean(self.dim)
 
 
-class RiskPredictionWrapper(BaseRiskPredictionWrapper):
+class LossPredictionWrapper(BaseLossPredictionWrapper):
     """
-    This module takes a model as input and creates a risk prediction module from it.
+    This module takes a model as input and creates a loss prediction module from it.
     """
 
     def __init__(
@@ -273,13 +273,13 @@ class RiskPredictionWrapper(BaseRiskPredictionWrapper):
 
         regressor_features = features.detach() if self.stopgrad else features
 
-        risk_values = self.regressor(regressor_features).squeeze()
+        loss_values = self.regressor(regressor_features).squeeze()
 
         if self.training:
-            return logits, risk_values
+            return logits, loss_values
         else:
             return {
                 "logit": logits,
                 "feature": features,
-                "risk_value": risk_values,
+                "risk_value": loss_values,
             }

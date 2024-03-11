@@ -3,6 +3,8 @@ from .correctness_prediction_wrapper import (
     CorrectnessPredictionWrapper,
     DeepCorrectnessPredictionWrapper,
 )
+from .temperature_wrapper import TemperatureWrapper
+from .ddu_wrapper import DDUWrapper
 from .deep_ensemble_wrapper import DeepEnsembleWrapper
 from .deterministic_wrapper import DeterministicWrapper
 from .dropout_wrapper import DropoutWrapper
@@ -13,10 +15,10 @@ from .mahalanobis_wrapper import MahalanobisWrapper
 from .mcinfonce_wrapper import MCInfoNCEWrapper
 from .model_wrapper import ModelWrapper, PosteriorWrapper, SpecialWrapper
 from .nivmf_wrapper import NonIsotropicvMFWrapper
-from .risk_prediction_wrapper import (
-    BaseRiskPredictionWrapper,
-    DeepRiskPredictionWrapper,
-    RiskPredictionWrapper,
+from .loss_prediction_wrapper import (
+    BaseLossPredictionWrapper,
+    DeepLossPredictionWrapper,
+    LossPredictionWrapper,
 )
 from .shallow_ensemble_wrapper import ShallowEnsembleWrapper
 from .sngp_wrapper import SNGPWrapper

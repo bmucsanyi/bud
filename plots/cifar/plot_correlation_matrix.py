@@ -1,4 +1,3 @@
-import os
 import matplotlib.pyplot as plt
 
 import numpy as np
@@ -7,6 +6,15 @@ import wandb
 
 from tueplots import bundles
 from scipy.stats import spearmanr
+import sys
+import json
+
+sys.path.insert(0, "..")
+
+from utils import (
+    ESTIMATOR_CONVERSION_DICT,
+    create_directory,
+)
 
 plt.rcParams.update(
     bundles.icml2022(family="serif", usetex=True, nrows=1, column="half")
@@ -15,33 +23,29 @@ plt.rcParams.update(
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
 
 
-def create_directory(path):
-    """Creates a directory if it does not exist."""
-    if not os.path.exists(path):
-        os.makedirs(path)
-
-
-ESTIMATOR_CONVERSION_DICT = {
-    "entropies_of_fbar": r"$\mathbb{H}(\bar{f})$",
-    "entropies_of_bma": r"$\text{PU}^\text{it}$",
-    "expected_entropies": r"$\text{AU}^\text{it}$",
-    "expected_entropies_plus_expected_divergences": r"$\text{AU}^\text{it} + \text{EU}^\text{b}$",
-    "one_minus_max_probs_of_fbar": r"$\max \bar{f}$",
-    "one_minus_max_probs_of_bma": r"$\max \tilde{f}$",
-    "one_minus_expected_max_probs": r"$\mathbb{E}\left[\max f\right]$",
-    "expected_divergences": r"$\text{EU}^\text{b}$",
-    "jensen_shannon_divergences": r"$\text{EU}^\text{it}$",
-    "error_probabilities": r"$u^\text{cp}$",
-    "duq_values": r"$u^\text{duq}$",
-    "mahalanobis_values": r"$u^\text{mah}$",
-    "risk_values": r"$u^\text{rp}$",
-    "hard_bma_accuracy": None,
-}
-
-
 def main():
-    wandb.login(key="341d19ab018aff60423f1ea0049fa41553ef94b4")
+    # Add accuracy to estimator dict
+    ESTIMATOR_CONVERSION_DICT["hard_bma_accuracy"] = "none"
+
+    with open("../../wandb_key.json") as f:
+        wandb_key = json.load(f)["key"]
+
+    wandb.login(key=wandb_key)
     api = wandb.Api()
+
+    create_directory("results")
+    create_directory("results/correlation_matrix")
+
+    metric_dict = {
+        "log_prob_score_hard_bma_correctness": "Log Prob.",
+        "brier_score_hard_bma_correctness": "Brier",
+        "ece_hard_bma_correctness": "-ECE (*)",
+        "auroc_hard_bma_correctness": "Correctness",
+        "cumulative_hard_bma_abstinence_auc": "Abstinence",
+        "hard_bma_accuracy": "Accuracy",
+        "rank_correlation_bregman_au": "Aleatoric",
+        "auroc_oodness": "OOD (*)",
+    }
 
     id_to_method = {
         "2vkuhe38": "GP",
@@ -50,23 +54,10 @@ def main():
         "9jztoaos": "Dropout",
         "f32n7c05": "SNGP",
         "03coev3u": "DUQ",
-        "6r8nfwqc": "Shallow Ensemble",
-        "xsvl0zop": "Correctness Prediction",
-        "ymq2jv64": "Deep Ensemble",
+        "6r8nfwqc": "Shallow Ens.",
+        "xsvl0zop": "Corr. Pred.",
+        "ymq2jv64": "Deep Ens.",
         "gkvfnbup": "Laplace",
-    }
-
-    create_directory("results")
-    create_directory(f"results/correlation_matrix")
-
-    metric_dict = {
-        "hard_bma_accuracy": "Accuracy",
-        "auroc_hard_bma_correctness": "Correctness",
-        "cumulative_hard_bma_abstinence_auc": "Abstinence",
-        "auroc_oodness": "OOD",
-        "ece_hard_bma_correctness": "-ECE",
-        "log_prob_score_hard_bma_correctness": "Log Prob.",
-        "brier_score_hard_bma_correctness": "Brier",
     }
 
     fig, ax = plt.subplots()
@@ -77,16 +68,17 @@ def main():
     id_prefix = "best_id_test"
     mixture_prefix = "best_ood_test_soft/cifar10S2_mixed_soft/cifar10"
 
-
     for j, (method_id, method_name) in enumerate(tqdm(id_to_method.items())):
         sweep = api.sweep(f"bmucsanyi/bias/{method_id}")
 
         for i, (metric_id, metric_name) in enumerate(metric_dict.items()):
-            prefix = id_prefix if metric_name != "OOD" else mixture_prefix
+            prefix = id_prefix if metric_name != "OOD (*)" else mixture_prefix
 
             estimator_dict = {}
 
             for run in sweep.runs:
+                if run.state != "finished":
+                    continue
                 for key in sorted(run.summary.keys()):
                     if key.startswith(prefix) and key.endswith(metric_id):
                         stripped_key = key.replace(f"{prefix}_", "").replace(
@@ -104,19 +96,21 @@ def main():
                         else:
                             estimator_dict[stripped_key].append(run.summary[key])
 
-                        if metric_name == "-ECE":
+                        if metric_name == "-ECE (*)":
                             estimator_dict[stripped_key][-1] *= -1
 
             for key in tuple(estimator_dict.keys()):
+                if "NaN" in estimator_dict[key]:
+                    continue
                 estimator_dict[key] = np.mean(estimator_dict[key])
 
             if len(estimator_dict) > 1:
-                if method_name == "Correctness Prediction":
+                if method_name == "Corr. Pred.":
                     estimator = "error_probabilities"
                 elif method_name == "DUQ":
                     estimator = "duq_values"
                 else:
-                    estimator = "one_minus_max_probs_of_fbar"
+                    estimator = "one_minus_expected_max_probs"
             else:
                 estimator = next(iter(estimator_dict.keys()))
 
@@ -145,7 +139,10 @@ def main():
 
     # Add colorbar
     cbar = fig.colorbar(cax)
+    cbar.outline.set_visible(False)
+    cbar.ax.tick_params(width=0.1)
     cbar.set_ticks([-1, -0.5, 0, 0.5, 1])
+    cbar.set_ticklabels(["$-1$", "$-0.5$", "$0$", "$0.5$", "$1$"])
 
     # Set ticks
     ax.set_xticks(np.arange(len(metric_dict)))
@@ -169,10 +166,9 @@ def main():
                     ha="center",
                     va="center",
                     color="black",
-                    fontsize=5
+                    fontsize=5,
                 )
     ax.spines[["right", "top"]].set_visible(False)
-
     plt.savefig("results/correlation_matrix/correlation_matrix.pdf")
 
 

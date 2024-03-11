@@ -1,10 +1,18 @@
-import os
 import matplotlib.pyplot as plt
 
 import numpy as np
 from tqdm import tqdm
 import wandb
 import matplotlib.colors as mcolors
+import sys
+import json
+
+sys.path.insert(0, "..")
+
+from utils import (
+    ESTIMATOR_CONVERSION_DICT,
+    create_directory,
+)
 
 from tueplots import bundles
 
@@ -16,36 +24,11 @@ plt.rcParams.update(config)
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
 
 
-def create_directory(path):
-    """Creates a directory if it does not exist."""
-    if not os.path.exists(path):
-        os.makedirs(path)
-
-
-ESTIMATOR_CONVERSION_DICT = {
-    "entropies_of_fbar": r"$\mathbb{H}(\bar{f})$",
-    "entropies_of_bma": r"$\text{PU}^\text{it}$",
-    "expected_entropies": r"$\text{AU}^\text{it}$",
-    "expected_entropies_plus_expected_divergences": r"$\text{AU}^\text{it} + \text{EU}^\text{b}$",
-    "one_minus_max_probs_of_fbar": r"$\max \bar{f}$",
-    "one_minus_max_probs_of_bma": r"$\max \tilde{f}$",
-    "one_minus_expected_max_probs": r"$\mathbb{E}\left[\max f\right]$",
-    "expected_divergences": r"$\text{EU}^\text{b}$",
-    "jensen_shannon_divergences": r"$\text{EU}^\text{it}$",
-    "gt_total_predictives_bregman_fbar": r"$\text{PU}^\text{b}$",
-    "gt_biases_bregman_fbar": r"$\text{B}^\text{b}$",
-    "gt_predictives_bregman_fbar": r"$\text{AU}^\text{b} + \text{B}^\text{b}$",
-    "gt_aleatorics_bregman": r"$\text{AU}^\text{b}$",
-    "error_probabilities": r"$u^\text{cp}$",
-    "duq_values": r"$u^\text{duq}$",
-    "mahalanobis_values": r"$u^\text{mah}$",
-    "risk_values": r"$u^\text{rp}$",
-    "hard_bma_accuracy": None,
-}
-
-
 def main():
-    wandb.login(key="341d19ab018aff60423f1ea0049fa41553ef94b4")
+    with open("../../wandb_key.json") as f:
+        wandb_key = json.load(f)["key"]
+
+    wandb.login(key=wandb_key)
     api = wandb.Api()
 
     id_to_method = {
@@ -56,12 +39,12 @@ def main():
     }
 
     dataset_conversion_dict = {
-        "best_id_test": "CIFAR-10 Clean",
-        "best_ood_test_soft/imagenetS1": "CIFAR-10 Severity 1",
-        "best_ood_test_soft/imagenetS2": "CIFAR-10 Severity 2",
-        "best_ood_test_soft/imagenetS3": "CIFAR-10 Severity 3",
-        "best_ood_test_soft/imagenetS4": "CIFAR-10 Severity 4",
-        "best_ood_test_soft/imagenetS5": "CIFAR-10 Severity 5",
+        "best_id_test": "ImageNet Clean",
+        "best_ood_test_soft/imagenetS1": "ImageNet Severity 1",
+        "best_ood_test_soft/imagenetS2": "ImageNet Severity 2",
+        "best_ood_test_soft/imagenetS3": "ImageNet Severity 3",
+        "best_ood_test_soft/imagenetS4": "ImageNet Severity 4",
+        "best_ood_test_soft/imagenetS5": "ImageNet Severity 5",
     }
 
     create_directory("results")

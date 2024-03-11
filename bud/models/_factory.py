@@ -9,16 +9,18 @@ from bud.wrappers import (
     CorrectnessPredictionWrapper,
     DeepCorrectnessPredictionWrapper,
     DeepEnsembleWrapper,
-    DeepRiskPredictionWrapper,
+    DeepLossPredictionWrapper,
     DeterministicWrapper,
+    TemperatureWrapper,
     DropoutWrapper,
     DUQWrapper,
+    DDUWrapper,
     HETXLWrapper,
     LaplaceWrapper,
     MahalanobisWrapper,
     MCInfoNCEWrapper,
     NonIsotropicvMFWrapper,
-    RiskPredictionWrapper,
+    LossPredictionWrapper,
     ShallowEnsembleWrapper,
     SNGPWrapper,
 )
@@ -92,6 +94,9 @@ def create_model(
     matrix_rank,
     temperature,
     is_last_layer_laplace,
+    pred_type,
+    prior_optimization_method,
+    hessian_structure,
     magnitude,
     initial_average_kappa,
     num_heads,
@@ -222,6 +227,9 @@ def create_model(
         matrix_rank=matrix_rank,
         temperature=temperature,
         is_last_layer_laplace=is_last_layer_laplace,
+        pred_type=pred_type,
+        prior_optimization_method=prior_optimization_method,
+        hessian_structure=hessian_structure,
         magnitude=magnitude,
         initial_average_kappa=initial_average_kappa,
         num_heads=num_heads,
@@ -265,6 +273,9 @@ def wrap_model(
     matrix_rank,
     temperature,
     is_last_layer_laplace,
+    pred_type,
+    prior_optimization_method,
+    hessian_structure,
     magnitude,
     initial_average_kappa,
     num_heads,
@@ -300,8 +311,15 @@ def wrap_model(
             module_type=module_type,
             module_name_regex=module_name_regex,
         )
+    elif model_wrapper_name == "temperature":
+        wrapped_model = TemperatureWrapper(model=model, weight_path=weight_paths[0])
     elif model_wrapper_name == "deep-ensemble":
-        return DeepEnsembleWrapper(model=model, weight_paths=weight_paths, use_pretrained=use_pretrained, kwargs=kwargs)
+        return DeepEnsembleWrapper(
+            model=model,
+            weight_paths=weight_paths,
+            use_pretrained=use_pretrained,
+            kwargs=kwargs,
+        )
     elif model_wrapper_name == "deterministic":
         wrapped_model = DeterministicWrapper(model=model)
     elif model_wrapper_name == "dropout":
@@ -318,6 +336,13 @@ def wrap_model(
             rbf_length_scale=rbf_length_scale,
             ema_momentum=ema_momentum,
         )
+    elif model_wrapper_name == "ddu":
+        wrapped_model = DDUWrapper(
+            model=model,
+            is_spectral_normalized=is_spectral_normalized,
+            spectral_normalization_iteration=spectral_normalization_iteration,
+            spectral_normalization_bound=spectral_normalization_bound,
+        )
     elif model_wrapper_name == "het-xl":
         wrapped_model = HETXLWrapper(
             model=model,
@@ -331,6 +356,9 @@ def wrap_model(
             num_mc_samples=num_mc_samples,
             weight_path=weight_paths[0],
             is_last_layer_laplace=is_last_layer_laplace,
+            pred_type=pred_type,
+            prior_optimization_method=prior_optimization_method,
+            hessian_structure=hessian_structure,
         )
     elif model_wrapper_name == "mahalanobis":
         wrapped_model = MahalanobisWrapper(
@@ -355,14 +383,14 @@ def wrap_model(
             initial_average_kappa=initial_average_kappa,
         )
     elif model_wrapper_name == "risk-prediction":
-        wrapped_model = RiskPredictionWrapper(
+        wrapped_model = LossPredictionWrapper(
             model=model,
             num_hidden_features=num_hidden_features,
             mlp_depth=mlp_depth,
             stopgrad=stopgrad,
         )
     elif model_wrapper_name == "deep-risk-prediction":
-        wrapped_model = DeepRiskPredictionWrapper(
+        wrapped_model = DeepLossPredictionWrapper(
             model=model,
             num_hidden_features=num_hidden_features,
             mlp_depth=mlp_depth,

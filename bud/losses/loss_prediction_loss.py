@@ -1,7 +1,7 @@
 from torch import Tensor, nn
 
 
-class RiskPredictionLoss(nn.Module):
+class LossPredictionLoss(nn.Module):
     def __init__(
         self,
         lambda_uncertainty_loss,
@@ -21,7 +21,7 @@ class RiskPredictionLoss(nn.Module):
         prediction_tuple: tuple,
         target: Tensor,
     ) -> Tensor:
-        prediction, risk_prediction = prediction_tuple
+        prediction, loss_prediction = prediction_tuple
 
         task_loss_per_sample = self.task_loss(prediction, target)
 
@@ -30,7 +30,7 @@ class RiskPredictionLoss(nn.Module):
         else:
             task_loss_target = task_loss_per_sample
 
-        uncertainty_loss = self.uncertainty_loss(risk_prediction, task_loss_target)
+        uncertainty_loss = self.uncertainty_loss(loss_prediction, task_loss_target)
         task_loss = task_loss_per_sample.mean()
 
         return (

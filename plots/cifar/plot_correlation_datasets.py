@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 import wandb
+import json
 
 from tueplots import bundles
 from scipy.stats import spearmanr
@@ -40,7 +41,10 @@ ESTIMATOR_CONVERSION_DICT = {
 
 
 def main():
-    wandb.login(key="341d19ab018aff60423f1ea0049fa41553ef94b4")
+    with open("../../wandb_key.json") as f:
+        wandb_key = json.load(f)["key"]
+
+    wandb.login(key=wandb_key)
     api = wandb.Api()
 
     method_to_ids = {
@@ -56,9 +60,6 @@ def main():
         "Laplace": ("tri75olb", "gkvfnbup"),
         "Mahalanobis": ("somhugzm", "swr2k8kf"),
     }
-
-    create_directory("results")
-    create_directory(f"results/correlation_matrix")
 
     metric_dict = {
         "log_prob_score_hard_bma_correctness": "Log Prob.",
@@ -93,16 +94,14 @@ def main():
             sweep_cifar = api.sweep(f"bmucsanyi/bias/{cifar_id}")
 
             for i, (metric_id, metric_name) in enumerate(metric_dict.items()):
-                print(metric_id, metric_name)
-
                 estimator_dict = {}
 
-                for sweep, performance_matrix, anyam in zip(
+                for sweep, performance_matrix, prefix in zip(
                     [sweep_imagenet, sweep_cifar],
                     [performance_matrix_imagenet, performance_matrix_cifar],
                     [mixture_prefix_imagenet, mixture_prefix_cifar],
                 ):
-                    prefix = id_prefix if metric_name != "OOD (*)" else anyam
+                    prefix = id_prefix if metric_name != "OOD (*)" else prefix
                     estimator_dict = {}
                     for run in sweep.runs:
                         for key in sorted(run.summary.keys()):
@@ -133,10 +132,8 @@ def main():
                         estimator_dict[key] = np.mean(estimator_dict[key])
 
                     if len(estimator_dict) > 1:
-                        if method_name == "Correctness Prediction":
+                        if method_name == "Corr. Pred.":
                             estimator = "error_probabilities"
-                        elif method_name == "DUQ":
-                            estimator = "duq_values"
                         else:
                             estimator = distributional_estimator
                     else:

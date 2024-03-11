@@ -1,70 +1,36 @@
 import argparse
-import os
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 import wandb
 import re
 from matplotlib.patches import Patch
+import sys
+import json
+
+sys.path.insert(0, "..")
+
+from utils import (
+    POSTERIOR_ESTIMATORS,
+    GT_LABELS,
+    ID_TO_METHOD_IMAGENET,
+    DATASET_CONVERSION_DICT_IMAGENET,
+    ESTIMATOR_CONVERSION_DICT,
+    create_directory,
+)
 
 from tueplots import bundles
 
 plt.rcParams.update(
     bundles.icml2022(family="serif", usetex=True, nrows=1, column="half")
 )
-from tueplots.constants.color import rgb
 
 from matplotlib.ticker import MultipleLocator
 
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
 
-GT_LABELS = [
-    r"$\text{PU}^\text{b}$",
-    r"$\text{B}^\text{b}$",
-    r"$\text{AU}^\text{b} + \text{B}^\text{b}$",
-    r"$\text{AU}^\text{b}$",
-]
 
-POSTERIOR_ESTIMATORS = [
-    "GP",
-    "HET-XL",
-    "Baseline",
-    "Dropout",
-    "SNGP",
-    "Shallow Ens.",
-    "Deep Ens.",
-    "Laplace",
-]
-
-ESTIMATOR_CONVERSION_DICT = {
-    "entropies_of_fbar": r"$\mathbb{H}(\bar{f})$",
-    "entropies_of_bma": r"$\text{PU}^\text{it}$",
-    "expected_entropies": r"$\text{AU}^\text{it}$",
-    "expected_entropies_plus_expected_divergences": r"$\text{AU}^\text{it} + \text{EU}^\text{b}$",
-    "one_minus_max_probs_of_fbar": r"$\max \bar{f}$",
-    "one_minus_max_probs_of_bma": r"$\max \tilde{f}$",
-    "one_minus_expected_max_probs": r"$\mathbb{E}\left[\max f\right]$",
-    "expected_divergences": r"$\text{EU}^\text{b}$",
-    "jensen_shannon_divergences": r"$\text{EU}^\text{it}$",
-    "gt_total_predictives_bregman_fbar": r"$\text{PU}^\text{b}$",
-    "gt_biases_bregman_fbar": r"$\text{B}^\text{b}$",
-    "gt_predictives_bregman_fbar": r"$\text{AU}^\text{b} + \text{B}^\text{b}$",
-    "gt_aleatorics_bregman": r"$\text{AU}^\text{b}$",
-    "error_probabilities": r"$u^\text{cp}$",
-    "duq_values": r"$u^\text{duq}$",
-    "mahalanobis_values": r"$u^\text{mah}$",
-    "risk_values": r"$u^\text{rp}$",
-    "hard_bma_accuracy": "",
-}
-
-
-def create_directory(path):
-    """Creates a directory if it does not exist."""
-    if not os.path.exists(path):
-        os.makedirs(path)
-
-
-def plot_and_save(suffix, data, save_path, y_min, y_max):
+def plot_and_save(suffix, data, save_path):
     """Plots and saves the metric's bar chart with min-max error bars as a PDF."""
     means = [np.mean(values) for values in data.values()]
     mins = [np.min(values) for values in data.values()]
@@ -79,7 +45,7 @@ def plot_and_save(suffix, data, save_path, y_min, y_max):
     combined = sorted(zip(labels, means, error_bars), key=lambda x: x[1], reverse=True)
     labels, means, error_bars = zip(*combined)
 
-    fig, ax = plt.subplots()
+    _, ax = plt.subplots()
     ax.grid(axis="y", which="both", zorder=1)
 
     # Set major ticks at every 0.1 and minor ticks at every 0.05
@@ -96,7 +62,7 @@ def plot_and_save(suffix, data, save_path, y_min, y_max):
     for bar, label in zip(bars, labels):
         ax.text(
             bar.get_x() + bar.get_width() / 2 + 0.05,
-            y_min + 0.03,
+            0.5 + 0.03,
             label,
             ha="center",
             va="bottom",
@@ -106,14 +72,9 @@ def plot_and_save(suffix, data, save_path, y_min, y_max):
         )
 
         if label in GT_LABELS:
-            bar.set_color(rgb.tue_red)
+            bar.set_color(np.array([234.0, 67.0, 53.0]) / 255.0)
         else:
-            bar.set_color(rgb.tue_blue)
-
-    if y_min:
-        ax.set_ylim(bottom=y_min)
-    if y_max:
-        ax.set_ylim(top=y_max)
+            bar.set_color(np.array([66.0, 103.0, 210.0]) / 255.0)
 
     # Add the mean values on top of the bars
     for i, (bar, mean) in enumerate(zip(bars, means)):
@@ -127,6 +88,23 @@ def plot_and_save(suffix, data, save_path, y_min, y_max):
             zorder=4,
         )
 
+    # Add legend for bar colors
+    legend_handles = [
+        Patch(facecolor=np.array([66.0, 103.0, 210.0]) / 255.0, label="Estimate"),
+        Patch(facecolor=np.array([234.0, 67.0, 53.0]) / 255.0, label="Ground Truth"),
+    ]
+
+    # Adding the legend with adjusted handlelength to make the patches more square-like
+    ax.legend(
+        frameon=False,
+        handles=legend_handles,
+        loc="upper right",
+        fontsize="small",
+        handlelength=1,
+        ncol=2,
+    )
+
+    ax.set_ylim(bottom=0.5, top=1)
     plt.savefig(save_path)
     plt.close()
 
@@ -136,9 +114,6 @@ def plot_and_save_aggregated(
     best_metric,
     best_metric_mins_maxs,
     save_path,
-    y_min,
-    y_max,
-    decreasing,
     label_offsets,
     offset_values,
 ):
@@ -151,11 +126,11 @@ def plot_and_save_aggregated(
 
     # Combine and sort by best values
     combined = sorted(
-        zip(labels, best_values, error_bars), key=lambda x: x[1], reverse=not decreasing
+        zip(labels, best_values, error_bars), key=lambda x: x[1], reverse=True
     )
     labels, best_values, error_bars = zip(*combined)
 
-    fig, ax = plt.subplots()
+    _, ax = plt.subplots()
     ax.grid(axis="y", which="both", zorder=1)
     # Set major ticks at every 0.1 and minor ticks at every 0.05
     multiplier = 2 if "Rank" in suffix else 1
@@ -178,7 +153,7 @@ def plot_and_save_aggregated(
         zorder=3,
     )
     ax.spines[["right", "top"]].set_visible(False)
-    ax.set_ylabel(suffix + (r" $\uparrow$" if not decreasing else r" $\downarrow$"))
+    ax.set_ylabel(suffix + r" $\uparrow$")
 
     ax.set(xticklabels=[])
     ax.tick_params(bottom=False)
@@ -199,7 +174,7 @@ def plot_and_save_aggregated(
         )  # Use the offset if available, otherwise default to 0.03
         ax.text(
             bar.get_x() + bar.get_width() / 2,
-            y_min + y_offset,  # Adjust the position using y_offset
+            0.5 + y_offset,  # Adjust the position using y_offset
             label,
             ha="center",
             va="bottom",
@@ -216,16 +191,16 @@ def plot_and_save_aggregated(
         if processed_label == "Baseline":
             bar.set_color(np.array([154.0, 160.0, 166.0]) / 255.0)
 
-    for i, (_, value) in enumerate(zip(bars, best_values)):
-        ax.text(
-            i,
-            value + 1e-3,
-            f"{value:.3f}",
-            ha="center",
-            va="bottom",
-            fontsize=5,
-            zorder=5,
-        )
+    # for i, (_, value) in enumerate(zip(bars, best_values)):
+    #     ax.text(
+    #         i,
+    #         value + 1e-3,
+    #         f"{value:.3f}",
+    #         ha="center",
+    #         va="bottom",
+    #         fontsize=5,
+    #         zorder=5,
+    #     )
 
     # Add legend for bar colors
     legend_handles = [
@@ -241,74 +216,35 @@ def plot_and_save_aggregated(
         handlelength=1,
     )
 
-    ax.set_ylim(bottom=y_min, top=y_max)
+    ax.set_ylim(bottom=0.5, top=1)
     plt.savefig(save_path)
     plt.close()
 
 
 def main(args):
-    wandb.login(key="341d19ab018aff60423f1ea0049fa41553ef94b4")
+    with open("../../wandb_key.json") as f:
+        wandb_key = json.load(f)["key"]
+
+    wandb.login(key=wandb_key)
     api = wandb.Api()
 
-    id_to_method = {
-        "hx2ni3sr": "GP",
-        "ktze6y0c": "HET-XL",
-        "7y7e6kjf": "Baseline",
-        "f52l00hb": "Dropout",
-        "us8v6277": "SNGP",
-        "795iqrk8": "Shallow Ens.",
-        "kl7436jj": "Risk Pred.",
-        "iskn1vp6": "Corr. Pred.",
-        "wzx8xxbn": "Deep Ens.",
-        "tri75olb": "Laplace",
-        "somhugzm": "Mahalanobis",
-    }
+    def func(x):
+        if isinstance(x, str):
+            return x
+        return max(x, 1 - x)
 
-    dataset_conversion_dict = {
-        "best_id_test": "CIFAR-10 Clean",
-        "best_ood_test_soft/imagenetS1": "CIFAR-10 Severity 1",
-        "best_ood_test_soft/imagenetS2": "CIFAR-10 Severity 2",
-        "best_ood_test_soft/imagenetS3": "CIFAR-10 Severity 3",
-        "best_ood_test_soft/imagenetS4": "CIFAR-10 Severity 4",
-        "best_ood_test_soft/imagenetS5": "CIFAR-10 Severity 5",
-        "best_ood_test_soft/imagenetS1_mixed_soft/imagenet": "CIFAR-10 Clean + Severity 1",
-        "best_ood_test_soft/imagenetS2_mixed_soft/imagenet": "CIFAR-10 Clean + Severity 2",
-        "best_ood_test_soft/imagenetS3_mixed_soft/imagenet": "CIFAR-10 Clean + Severity 3",
-        "best_ood_test_soft/imagenetS4_mixed_soft/imagenet": "CIFAR-10 Clean + Severity 4",
-        "best_ood_test_soft/imagenetS5_mixed_soft/imagenet": "CIFAR-10 Clean + Severity 5",
-    }
-
-    if args.correct_auroc:
-
-        def func(x):
-            if isinstance(x, str):
-                return x
-            return max(x, 1 - x)
-
-    elif args.correct_abs:
-
-        def func(x):
-            if isinstance(x, str):
-                return x
-            return abs(x)
-
-    else:
-        func = lambda x: x
-
-    for prefix in dataset_conversion_dict:
+    for prefix in DATASET_CONVERSION_DICT_IMAGENET:
         create_directory("results")
         create_directory(f"results/laplace_eu")
         create_directory(f"results/laplace_eu/{prefix.replace('/', '-')}")
         aggregated_estimators = {}
         aggregated_estimators_mins_maxs = {}
 
-        for method_id, method_name in tqdm(id_to_method.items()):
-            if args.only_posterior and method_name not in POSTERIOR_ESTIMATORS:
-                continue
+        for method_id, method_name in tqdm(ID_TO_METHOD_IMAGENET.items()):
             sweep = api.sweep(f"bmucsanyi/bias/{method_id}")
 
             metric = {}
-            suffix = args.metric
+            suffix = "auroc_oodness"
 
             for run in sweep.runs:
                 if run.state != "finished":
@@ -335,7 +271,8 @@ def main(args):
                             )
 
             save_path = (
-                f"results/laplace_eu/{prefix.replace('/', '-')}/{method_name}.pdf"
+                f"results/laplace_eu/{prefix.replace('/', '-')}/"
+                f"{method_name.replace('.', '').replace(' ', '_')}.pdf"
             )
             metric = {key: value for key, value in metric.items() if "NaN" not in value}
 
@@ -343,35 +280,26 @@ def main(args):
                 continue
 
             plot_and_save(
-                args.title,
+                "AUROC",
                 metric,
                 save_path,
-                args.y_min,
-                args.y_max,
             )
 
-            if "accuracy" not in args.metric:
-                if method_name == "Corr. Pred.":
-                    aggregated_key = ESTIMATOR_CONVERSION_DICT["error_probabilities"]
-                elif method_name == "Risk Pred.":
-                    aggregated_key = ESTIMATOR_CONVERSION_DICT["risk_values"]
-                elif method_name == "DUQ":
-                    aggregated_key = ESTIMATOR_CONVERSION_DICT["duq_values"]
-                elif method_name == "Mahalanobis":
-                    aggregated_key = ESTIMATOR_CONVERSION_DICT["mahalanobis_values"]
-                elif method_name == "Laplace":
-                    aggregated_key = ESTIMATOR_CONVERSION_DICT[
-                        "jensen_shannon_divergences"
-                    ]
-                else:
-                    aggregated_key = ESTIMATOR_CONVERSION_DICT.get(
-                        args.distributional_estimator
-                    )
+            if method_name == "Corr. Pred.":
+                aggregated_key = ESTIMATOR_CONVERSION_DICT["error_probabilities"]
+            elif method_name == "Loss Pred.":
+                aggregated_key = ESTIMATOR_CONVERSION_DICT["risk_values"]
+            elif method_name == "Mahalanobis":
+                aggregated_key = ESTIMATOR_CONVERSION_DICT["mahalanobis_values"]
+            elif method_name == "Laplace":
+                aggregated_key = ESTIMATOR_CONVERSION_DICT["jensen_shannon_divergences"]
             else:
-                aggregated_key = None
+                aggregated_key = ESTIMATOR_CONVERSION_DICT.get(
+                    args.distributional_estimator
+                )
 
             if aggregated_key is None:
-                operator = min if args.decreasing else max
+                operator = max
                 means = {
                     key: np.mean(metric[key]) for key in metric if key not in GT_LABELS
                 }
@@ -393,13 +321,10 @@ def main(args):
             f"results/laplace_eu/{prefix.replace('/', '-')}/aggregated.pdf"
         )
         plot_and_save_aggregated(
-            args.title,
+            "AUROC",
             aggregated_estimators,
             aggregated_estimators_mins_maxs,
             aggregated_save_path,
-            args.y_min,
-            args.y_max,
-            args.decreasing,
             args.label_offsets,
             args.offset_values,
         )
@@ -407,15 +332,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process the metric for plotting.")
-    parser.add_argument(
-        "title", type=str, help="Name of the metric to be used in the analysis."
-    )
-    parser.add_argument(
-        "metric", type=str, help="Name of the metric to be used in the analysis."
-    )
     parser.add_argument("--distributional-estimator", type=str, default=None)
-    parser.add_argument("--y-min", type=float, default=None, help="Minimum y value.")
-    parser.add_argument("--y-max", type=float, default=None, help="Maximum y value.")
     parser.add_argument(
         "--label-offsets",
         nargs="*",
@@ -428,30 +345,6 @@ if __name__ == "__main__":
         type=float,
         default=[],
         help="List of y-offset values corresponding to the labels.",
-    )
-    parser.add_argument(
-        "--decreasing",
-        action="store_true",
-        default=False,
-        help="Whether the metric is increasing or decreasing.",
-    )
-    parser.add_argument(
-        "--correct-auroc",
-        action="store_true",
-        default=False,
-        help="no",
-    )
-    parser.add_argument(
-        "--correct-abs",
-        action="store_true",
-        default=False,
-        help="no",
-    )
-    parser.add_argument(
-        "--only-posterior",
-        action="store_true",
-        default=False,
-        help="no",
     )
 
     args = parser.parse_args()

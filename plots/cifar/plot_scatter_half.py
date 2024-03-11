@@ -40,7 +40,7 @@ ESTIMATOR_CONVERSION_DICT = {
     "duq_values": r"$u^\text{duq}$",
     "mahalanobis_values": r"$u^\text{mah}$",
     "risk_values": r"$u^\text{rp}$",
-    "hard_bma_accuracy": None
+    "hard_bma_accuracy": None,
 }
 
 POSTERIOR_ESTIMATORS = [
@@ -49,8 +49,8 @@ POSTERIOR_ESTIMATORS = [
     "Baseline",
     "Dropout",
     "SNGP",
-    "Shallow Ensemble",
-    "Deep Ensemble",
+    "Shallow Ens.",
+    "Deep Ens.",
     "Laplace",
 ]
 
@@ -115,10 +115,10 @@ def main(args):
         "9jztoaos": "Dropout",
         "f32n7c05": "SNGP",
         "03coev3u": "DUQ",
-        "6r8nfwqc": "Shallow Ensemble",
-        "960a6hfa": "Risk Prediction",
-        "xsvl0zop": "Correctness Prediction",
-        "ymq2jv64": "Deep Ensemble",
+        "6r8nfwqc": "Shallow Ens.",
+        "960a6hfa": "Loss Pred.",
+        "xsvl0zop": "Corr. Pred.",
+        "ymq2jv64": "Deep Ens.",
         "gkvfnbup": "Laplace",
         "swr2k8kf": "Mahalanobis",
     }
@@ -172,25 +172,28 @@ def main(args):
                                 continue
 
                             if stripped_key not in metric:
-                                metric[stripped_key] = [
-                                    run.summary[key]
-                                ]
+                                metric[stripped_key] = [run.summary[key]]
                             else:
-                                metric[stripped_key].append(
-                                    run.summary[key]
-                                )
+                                metric[stripped_key].append(run.summary[key])
 
-            save_path = f"results/{args.metric_x}_{args.metric_y}/{prefix.replace('/', '-')}/{method_name}.pdf"
-            metric_x = {key: value for key, value in metric_x.items() if "NaN" not in value}
-            metric_y = {key: value for key, value in metric_y.items() if "NaN" not in value}
+            save_path = (
+                f"results/{args.metric_x}_{args.metric_y}/{prefix.replace('/', '-')}/"
+                f"{method_name.replace('.', '').replace(' ', '_')}.pdf"
+            )
+            metric_x = {
+                key: value for key, value in metric_x.items() if "NaN" not in value
+            }
+            metric_y = {
+                key: value for key, value in metric_y.items() if "NaN" not in value
+            }
 
             if not metric_x or not metric_y:
                 continue
-            
+
             if len(metric_x.keys()) > 1:
-                if method_name == "Correctness Prediction":
+                if method_name == "Corr. Pred.":
                     key_x = "error_probabilities"
-                elif method_name == "Risk Prediction":
+                elif method_name == "Loss Pred.":
                     key_x = "risk_values"
                 elif method_name == "DUQ":
                     key_x = "duq_values"
@@ -211,9 +214,9 @@ def main(args):
                 key_x = operator(means_x.items(), key=lambda x: x[1])[0]
 
             if len(metric_y.keys()) > 1:
-                if method_name == "Correctness Prediction":
+                if method_name == "Corr. Pred.":
                     key_y = "error_probabilities"
-                elif method_name == "Risk Prediction":
+                elif method_name == "Loss Pred.":
                     key_y = "risk_values"
                 elif method_name == "DUQ":
                     key_y = "duq_values"
@@ -223,7 +226,7 @@ def main(args):
                     key_y = key_x
             else:
                 key_y = list(metric_y.keys())[0]
-            
+
             if key_y is None and args.optimize_y:
                 operator = min if args.decreasing else max
                 means_y = {
@@ -233,13 +236,13 @@ def main(args):
                 }
                 key_y = operator(means_y.items(), key=lambda x: x[1])[0]
                 key_x = key_y
-            
+
             if key_x not in metric_x or key_y not in metric_y:
                 continue
 
             data_xs[method_name] = metric_x[key_x]
             data_ys[method_name] = metric_y[key_y]
-            
+
             plot_and_save(
                 args.label_x,
                 args.label_y,
@@ -254,28 +257,16 @@ def main(args):
         # Save the aggregated plot with min-max error bars
         aggregated_save_path = f"results/{args.metric_x}_{args.metric_y}/{prefix.replace('/', '-')}/aggregated.pdf"
         plot_and_save_aggregated(
-            args.label_x,
-            args.label_y,
-            data_xs,
-            data_ys,
-            aggregated_save_path
+            args.label_x, args.label_y, data_xs, data_ys, aggregated_save_path
         )
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process the metric for plotting.")
-    parser.add_argument(
-        "label_x", type=str, help="Label of x axis."
-    )
-    parser.add_argument(
-        "label_y", type=str, help="Label of y axis."
-    )
-    parser.add_argument(
-        "metric_x", type=str, help="Name of the x-axis metric."
-    )
-    parser.add_argument(
-        "metric_y", type=str, help="Name of the y-axis metric."
-    )
+    parser.add_argument("label_x", type=str, help="Label of x axis.")
+    parser.add_argument("label_y", type=str, help="Label of y axis.")
+    parser.add_argument("metric_x", type=str, help="Name of the x-axis metric.")
+    parser.add_argument("metric_y", type=str, help="Name of the y-axis metric.")
     parser.add_argument("--distributional-estimator", type=str, default=None)
     parser.add_argument(
         "--optimize-y",

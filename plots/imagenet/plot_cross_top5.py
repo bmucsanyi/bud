@@ -1,8 +1,13 @@
-import os
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 import wandb
+import sys
+import json
+
+sys.path.insert(0, "..")
+
+from utils import ID_TO_METHOD_IMAGENET, create_directory
 
 from tueplots import bundles
 
@@ -13,30 +18,14 @@ plt.rcParams.update(
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
 
 
-def create_directory(path):
-    """Creates a directory if it does not exist."""
-    if not os.path.exists(path):
-        os.makedirs(path)
-
-
 def main():
-    wandb.login(key="341d19ab018aff60423f1ea0049fa41553ef94b4")
-    api = wandb.Api()
+    default_colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 
-    id_to_method = {
-        "hx2ni3sr": "GP",
-        "ktze6y0c": "HET-XL",
-        "7y7e6kjf": "Baseline",
-        "f52l00hb": "Dropout",
-        "us8v6277": "SNGP",
-        "795iqrk8": "Shallow Ens.",
-        "kl7436jj": "Risk Pred.",
-        "iskn1vp6": "Corr. Pred.",
-        "wzx8xxbn": "Deep Ens.",
-        "o6wgl9no": "Deep Ens.+",
-        "tri75olb": "Laplace",
-        "somhugzm": "Mahalanobis",
-    }
+    with open("../../wandb_key.json") as f:
+        wandb_key = json.load(f)["key"]
+
+    wandb.login(key=wandb_key)
+    api = wandb.Api()
 
     dataset_list = [
         ("best_id_test", None),
@@ -63,34 +52,36 @@ def main():
     ]
 
     create_directory("results")
-    create_directory(f"results/corr_vs_acc_top5")
+    create_directory("results/corr_vs_acc_top5")
 
-    for method_id, method_name in tqdm(id_to_method.items()):
+    for method_id, method_name in tqdm(ID_TO_METHOD_IMAGENET.items()):
         sweep = api.sweep(f"bmucsanyi/bias/{method_id}")
         suffix_correctness = "auroc_hard_bma_correctness_top5"
         suffix_abstinence = "cumulative_hard_bma_abstinence_auc_top5"
 
         num_successful_runs = sum(1 for run in sweep.runs if run.state == "finished")
-        auroc_correctness_matrix = np.zeros((num_successful_runs, 6))  # [runs, severities]
+        auroc_correctness_matrix = np.zeros(
+            (num_successful_runs, 6)
+        )  # [runs, severities]
         auc_abstinence_matrix = np.zeros((num_successful_runs, 6))  # [runs, severities]
         accuracy_matrix = np.zeros((num_successful_runs, 6))
 
         for j, (prefix_normal, _) in enumerate(dataset_list):
-            if method_name == "Correctness Prediction":
+            if method_name == "Corr. Pred.":
                 key_auroc = "_error_probabilities_"
-            elif method_name == "Risk Prediction":
+            elif method_name == "Loss Pred.":
                 key_auroc = "_risk_values_"
-            elif method_name == "DUQ":
-                key_auroc = "_duq_values_"
             elif method_name == "Mahalanobis":
                 key_auroc = "_mahalanobis_values_"
             else:
-                key_auroc = "_one_minus_max_probs_of_fbar_"
+                key_auroc = "_one_minus_max_probs_of_bma_"
+
             key_accuracy = "_hard_bma_accuracy_top5"
 
             i = 0
             for run in sweep.runs:
-                if run.state != "finished": continue
+                if run.state != "finished":
+                    continue
                 auroc_correctness_matrix[i, j] = run.summary[
                     prefix_normal + key_auroc + suffix_correctness
                 ]
@@ -100,7 +91,7 @@ def main():
                 accuracy_matrix[i, j] = run.summary[prefix_normal + key_accuracy]
                 i += 1
 
-        save_path = f"results/corr_vs_acc_top5/{method_name}.pdf"
+        save_path = f"results/corr_vs_acc_top5/{method_name.replace('.', '').replace(' ', '_')}.pdf"
 
         # Plotting the results for each method
         severities = np.arange(6)  # Severities from 0 to 5
@@ -151,7 +142,7 @@ def main():
             yerr=2 * np.array(error_bars_auroc_correctness),
             fmt="-o",
             label="AUROC Correctness",
-            color=np.array([52.0, 168.0, 83.0]) / 255.0,
+            color=default_colors[0],
             markersize=3,
             ecolor=np.array([105.0, 109.0, 113.0]) / 255.0,
             elinewidth=1,
@@ -162,20 +153,20 @@ def main():
             means_auroc_correctness,
             yerr=error_bars_auroc_correctness,
             fmt="--o",
-            color=np.array([52.0, 168.0, 83.0]) / 255.0,
+            color=default_colors[0],
             markersize=3,
             ecolor=np.array([105.0, 109.0, 113.0]) / 255.0,
             elinewidth=1,
             capsize=5,
-            alpha=0.2
+            alpha=0.2,
         )
         plt.errorbar(
             severities,
-            (1 - means_accuracy)**(-1) * (means_auc_abstinence - means_accuracy),
-            yerr=(1 - means_accuracy)**(-1) * np.array(error_bars_auc_abstinence),
+            (1 - means_accuracy) ** (-1) * (means_auc_abstinence - means_accuracy),
+            yerr=(1 - means_accuracy) ** (-1) * np.array(error_bars_auc_abstinence),
             fmt="-o",
             label="AUC Abstinence",
-            color=np.array([251.0, 188.0, 4.0]) / 255.0,
+            color=default_colors[1],
             markersize=3,
             ecolor=np.array([105.0, 109.0, 113.0]) / 255.0,
             elinewidth=1,
@@ -186,20 +177,20 @@ def main():
             means_auc_abstinence,
             yerr=error_bars_auc_abstinence,
             fmt="--o",
-            color=np.array([251.0, 188.0, 4.0]) / 255.0,
+            color=default_colors[1],
             markersize=3,
             ecolor=np.array([105.0, 109.0, 113.0]) / 255.0,
             elinewidth=1,
             capsize=5,
-            alpha=0.2
+            alpha=0.2,
         )
         plt.errorbar(
             severities,
-            1000/999 * (means_accuracy - 0.001),
-            yerr=1000/999 * np.array(error_bars_accuracy),
+            1000 / 999 * (means_accuracy - 0.001),
+            yerr=1000 / 999 * np.array(error_bars_accuracy),
             fmt="-o",
             label="Accuracy",
-            color=np.array([66.0, 103.0, 210.0]) / 255.0,
+            color=default_colors[2],
             markersize=3,
             ecolor=np.array([105.0, 109.0, 113.0]) / 255.0,
             elinewidth=1,
@@ -210,25 +201,25 @@ def main():
             means_accuracy,
             yerr=error_bars_accuracy,
             fmt="--o",
-            color=np.array([66.0, 103.0, 210.0]) / 255.0,
+            color=default_colors[2],
             markersize=3,
             ecolor=np.array([105.0, 109.0, 113.0]) / 255.0,
             elinewidth=1,
             capsize=5,
-            alpha=0.2
+            alpha=0.2,
         )
 
         plt.xlabel("Severity Level")
-        plt.ylabel(rf"{method_name} AUROCs and Acc. $\uparrow$")
+        plt.ylabel(rf"AUROCs and Accuracy $\uparrow$")
         plt.ylim(0, 1)
 
         handles, labels = plt.gca().get_legend_handles_labels()
         handles = [h[0] for h in handles]
 
-        plt.legend(handles, labels)
-        plt.grid(True)
+        plt.legend(handles, labels, frameon=False)
+        plt.grid(True, linewidth=0.5)
         plt.savefig(save_path)
-        plt.clf()
+        plt.clf()  # Clear the figure for the next plot
 
 
 if __name__ == "__main__":

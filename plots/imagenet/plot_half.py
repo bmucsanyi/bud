@@ -1,11 +1,24 @@
 import argparse
-import os
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 import wandb
 import re
 from matplotlib.patches import Patch
+import sys
+import json
+
+sys.path.insert(0, "..")
+
+from utils import (
+    POSTERIOR_ESTIMATORS,
+    GT_LABELS,
+    ID_TO_METHOD_IMAGENET,
+    DATASET_CONVERSION_DICT_IMAGENET,
+    ESTIMATOR_CONVERSION_DICT,
+    ESTIMATORLESS_METRICS,
+    create_directory,
+)
 
 from tueplots import bundles
 
@@ -18,51 +31,6 @@ plt.rcParams.update(config)
 from matplotlib.ticker import MultipleLocator
 
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
-
-GT_LABELS = [
-    r"$\text{PU}^\text{b}$",
-    r"$\text{B}^\text{b}$",
-    r"$\text{AU}^\text{b} + \text{B}^\text{b}$",
-    r"$\text{AU}^\text{b}$",
-]
-
-POSTERIOR_ESTIMATORS = [
-    "GP",
-    "HET-XL",
-    "Baseline",
-    "Dropout",
-    "SNGP",
-    "Shallow Ens.",
-    "Deep Ens.",
-    "Laplace",
-]
-
-ESTIMATOR_CONVERSION_DICT = {
-    "entropies_of_fbar": r"$\mathbb{H}(\bar{f})$",
-    "entropies_of_bma": r"$\text{PU}^\text{it}$",
-    "expected_entropies": r"$\text{AU}^\text{it}$",
-    "expected_entropies_plus_expected_divergences": r"$\text{AU}^\text{it} + \text{EU}^\text{b}$",
-    "one_minus_max_probs_of_fbar": r"$\max \bar{f}$",
-    "one_minus_max_probs_of_bma": r"$\max \tilde{f}$",
-    "one_minus_expected_max_probs": r"$\mathbb{E}\left[\max f\right]$",
-    "expected_divergences": r"$\text{EU}^\text{b}$",
-    "jensen_shannon_divergences": r"$\text{EU}^\text{it}$",
-    "gt_total_predictives_bregman_fbar": r"$\text{PU}^\text{b}$",
-    "gt_biases_bregman_fbar": r"$\text{B}^\text{b}$",
-    "gt_predictives_bregman_fbar": r"$\text{AU}^\text{b} + \text{B}^\text{b}$",
-    "gt_aleatorics_bregman": r"$\text{AU}^\text{b}$",
-    "error_probabilities": r"$u^\text{cp}$",
-    "duq_values": r"$u^\text{duq}$",
-    "mahalanobis_values": r"$u^\text{mah}$",
-    "risk_values": r"$u^\text{rp}$",
-    "hard_bma_accuracy": "",
-}
-
-
-def create_directory(path):
-    """Creates a directory if it does not exist."""
-    if not os.path.exists(path):
-        os.makedirs(path)
 
 
 def plot_and_save(suffix, data, save_path, y_min, y_max):
@@ -95,10 +63,9 @@ def plot_and_save(suffix, data, save_path, y_min, y_max):
     ax.tick_params(bottom=False)
 
     for bar, label in zip(bars, labels):
-        lift = 0.2 if label == r"$\text{AU}^\text{b} + \text{B}^\text{b}$" else 0.03
         ax.text(
             bar.get_x() + bar.get_width() / 2 + 0.05,
-            y_min + lift,
+            y_min + 0.03,
             label,
             ha="center",
             va="bottom",
@@ -143,6 +110,7 @@ def plot_and_save_aggregated(
     decreasing,
     label_offsets,
     offset_values,
+    only_posterior,
 ):
     """Plots and saves the aggregated best values with min-max error bars as a PDF."""
     labels, best_values = zip(*best_metric.items())
@@ -218,32 +186,37 @@ def plot_and_save_aggregated(
         if processed_label == "Baseline":
             bar.set_color(np.array([154.0, 160.0, 166.0]) / 255.0)
 
-    for i, (_, value) in enumerate(zip(bars, best_values)):
-        ax.text(
-            i,
-            value + 1e-3,
-            f"{value:.3f}",
-            ha="center",
-            va="bottom",
-            fontsize=5,
-            zorder=5,
+    # for i, (_, value) in enumerate(zip(bars, best_values)):
+    #     ax.text(
+    #         i,
+    #         value + 1e-3,
+    #         f"{value:.3f}",
+    #         ha="center",
+    #         va="bottom",
+    #         fontsize=5,
+    #         zorder=5,
+    #     )
+
+    if not only_posterior:
+        # Add legend for bar colors
+        legend_handles = [
+            Patch(
+                facecolor=np.array([52.0, 168.0, 83.0]) / 255.0, label="Distributional"
+            ),
+            Patch(
+                facecolor=np.array([251.0, 188.0, 4.0]) / 255.0, label="Deterministic"
+            ),
+        ]
+
+        # Adding the legend with adjusted handlelength to make the patches more square-like
+        ax.legend(
+            frameon=False,
+            handles=legend_handles,
+            loc="upper right",
+            fontsize="small",
+            handlelength=1,
+            ncol=2,
         )
-
-    # Add legend for bar colors
-    legend_handles = [
-        Patch(facecolor=np.array([52.0, 168.0, 83.0]) / 255.0, label="Distributional"),
-        Patch(facecolor=np.array([251.0, 188.0, 4.0]) / 255.0, label="Deterministic"),
-    ]
-
-    # Adding the legend with adjusted handlelength to make the patches more square-like
-    ax.legend(
-        frameon=False,
-        handles=legend_handles,
-        loc="upper right",
-        fontsize="small",
-        handlelength=1,
-        ncol=2,
-    )
 
     ax.set_ylim(bottom=y_min, top=y_max)
     plt.savefig(save_path)
@@ -251,36 +224,11 @@ def plot_and_save_aggregated(
 
 
 def main(args):
-    wandb.login(key="341d19ab018aff60423f1ea0049fa41553ef94b4")
+    with open("../../wandb_key.json") as f:
+        wandb_key = json.load(f)["key"]
+
+    wandb.login(key=wandb_key)
     api = wandb.Api()
-
-    id_to_method = {
-        "hx2ni3sr": "GP",
-        "ktze6y0c": "HET-XL",
-        "7y7e6kjf": "Baseline",
-        "f52l00hb": "Dropout",
-        "us8v6277": "SNGP",
-        "795iqrk8": "Shallow Ens.",
-        "kl7436jj": "Loss Pred.",
-        "iskn1vp6": "Corr. Pred.",
-        "wzx8xxbn": "Deep Ens.",
-        "tri75olb": "Laplace",
-        "somhugzm": "Mahalanobis",
-    }
-
-    dataset_conversion_dict = {
-        "best_id_test": "CIFAR-10 Clean",
-        "best_ood_test_soft/imagenetS1": "CIFAR-10 Severity 1",
-        "best_ood_test_soft/imagenetS2": "CIFAR-10 Severity 2",
-        "best_ood_test_soft/imagenetS3": "CIFAR-10 Severity 3",
-        "best_ood_test_soft/imagenetS4": "CIFAR-10 Severity 4",
-        "best_ood_test_soft/imagenetS5": "CIFAR-10 Severity 5",
-        "best_ood_test_soft/imagenetS1_mixed_soft/imagenet": "CIFAR-10 Clean + Severity 1",
-        "best_ood_test_soft/imagenetS2_mixed_soft/imagenet": "CIFAR-10 Clean + Severity 2",
-        "best_ood_test_soft/imagenetS3_mixed_soft/imagenet": "CIFAR-10 Clean + Severity 3",
-        "best_ood_test_soft/imagenetS4_mixed_soft/imagenet": "CIFAR-10 Clean + Severity 4",
-        "best_ood_test_soft/imagenetS5_mixed_soft/imagenet": "CIFAR-10 Clean + Severity 5",
-    }
 
     if args.correct_auroc:
 
@@ -299,16 +247,17 @@ def main(args):
     else:
         func = lambda x: x
 
-    for prefix in dataset_conversion_dict:
+    for prefix in DATASET_CONVERSION_DICT_IMAGENET:
         create_directory("results")
         create_directory(f"results/{args.metric}")
         create_directory(f"results/{args.metric}/{prefix.replace('/', '-')}")
         aggregated_estimators = {}
         aggregated_estimators_mins_maxs = {}
 
-        for method_id, method_name in tqdm(id_to_method.items()):
+        for method_id, method_name in tqdm(ID_TO_METHOD_IMAGENET.items()):
             if args.only_posterior and method_name not in POSTERIOR_ESTIMATORS:
                 continue
+
             sweep = api.sweep(f"bmucsanyi/bias/{method_id}")
 
             metric = {}
@@ -323,23 +272,27 @@ def main(args):
                             f"_{suffix}", ""
                         )
 
-                        if (
-                            "mixed" in stripped_key
-                            or stripped_key not in ESTIMATOR_CONVERSION_DICT
+                        if "mixed" in stripped_key or not (
+                            stripped_key in ESTIMATOR_CONVERSION_DICT
+                            or stripped_key in ESTIMATORLESS_METRICS
                         ):
                             continue
 
-                        if ESTIMATOR_CONVERSION_DICT[stripped_key] not in metric:
-                            metric[ESTIMATOR_CONVERSION_DICT[stripped_key]] = [
-                                func(run.summary[key])
-                            ]
+                        if (
+                            ESTIMATOR_CONVERSION_DICT.get(stripped_key, "none")
+                            not in metric
+                        ):
+                            metric[
+                                ESTIMATOR_CONVERSION_DICT.get(stripped_key, "none")
+                            ] = [func(run.summary[key])]
                         else:
-                            metric[ESTIMATOR_CONVERSION_DICT[stripped_key]].append(
-                                func(run.summary[key])
-                            )
+                            metric[
+                                ESTIMATOR_CONVERSION_DICT.get(stripped_key, "none")
+                            ].append(func(run.summary[key]))
 
             save_path = (
-                f"results/{args.metric}/{prefix.replace('/', '-')}/{method_name}.pdf"
+                f"results/{args.metric}/{prefix.replace('/', '-')}/"
+                f"{method_name.replace('.', '').replace(' ', '_')}.pdf"
             )
             metric = {key: value for key, value in metric.items() if "NaN" not in value}
 
@@ -354,13 +307,11 @@ def main(args):
                 args.y_max,
             )
 
-            if "accuracy" not in args.metric:
+            if args.metric not in ESTIMATORLESS_METRICS:
                 if method_name == "Corr. Pred.":
                     aggregated_key = ESTIMATOR_CONVERSION_DICT["error_probabilities"]
-                elif method_name == "Risk Pred.":
+                elif method_name == "Loss Pred.":
                     aggregated_key = ESTIMATOR_CONVERSION_DICT["risk_values"]
-                elif method_name == "DUQ":
-                    aggregated_key = ESTIMATOR_CONVERSION_DICT["duq_values"]
                 elif method_name == "Mahalanobis":
                     aggregated_key = ESTIMATOR_CONVERSION_DICT["mahalanobis_values"]
                 else:
@@ -402,6 +353,7 @@ def main(args):
             args.decreasing,
             args.label_offsets,
             args.offset_values,
+            args.only_posterior,
         )
 
 
@@ -439,19 +391,16 @@ if __name__ == "__main__":
         "--correct-auroc",
         action="store_true",
         default=False,
-        help="no",
     )
     parser.add_argument(
         "--correct-abs",
         action="store_true",
         default=False,
-        help="no",
     )
     parser.add_argument(
         "--only-posterior",
         action="store_true",
         default=False,
-        help="no",
     )
 
     args = parser.parse_args()
