@@ -7,7 +7,6 @@ Hacked together by / Copyright 2019 Ross Wightman
                            and 2024 Bálint Mucsányi
 """
 import logging
-import os
 import random
 from contextlib import suppress
 from functools import partial
@@ -189,7 +188,7 @@ class PrefetchLoader:
                     next_input = self.random_erasing(next_input)
 
             if not first:
-                yield input, target
+                yield input, target  # noqa
             else:
                 first = False
 

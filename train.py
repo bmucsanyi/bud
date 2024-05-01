@@ -502,7 +502,7 @@ group.add_argument(
     help="whether to use spectral normalization in batch norm (default: False)",
 )
 group.add_argument(
-    "--use_tight_norm_for_pointwise_convs",
+    "--use-tight-norm-for-pointwise-convs",
     action="store_true",
     default=False,
     help="whether to use fully connected spectral normalization for pointwise convs (default: False)",

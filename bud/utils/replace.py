@@ -123,7 +123,7 @@ def register(
             )
 
         parametrize.register_parametrization(
-            module, attribute_name, target_parametrization(module=module, weight=weight)
+            module, attribute_name, target_parametrization(module=module)
         )
 
 
