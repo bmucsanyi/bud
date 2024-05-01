@@ -37,21 +37,21 @@ def main():
     create_directory("results/correlation_matrix")
 
     metric_dict = {
-        "log_prob_score_hard_bma_correctness": "Log Prob.",
-        "brier_score_hard_bma_correctness": "Brier",
+        "log_prob_score_hard_bma_correctness": "Log Prob. Score",
+        "brier_score_hard_bma_correctness": "Brier Score",
         "ece_hard_bma_correctness": "-ECE (*)",
-        "auroc_hard_bma_correctness": "Correctness",
-        "cumulative_hard_bma_abstinence_auc": "Abstinence",
+        "auroc_hard_bma_correctness": "Correctness AUROC",
+        "cumulative_hard_bma_abstinence_auc": "Abstinence AUC",
         "hard_bma_accuracy": "Accuracy",
-        "rank_correlation_bregman_au": "Aleatoric",
-        "auroc_oodness": "OOD (*)",
+        "rank_correlation_bregman_au": "Aleatoric Rank Corr.",
+        "auroc_oodness": "OOD AUROC (*)",
     }
 
     id_to_method = {
         "2vkuhe38": "GP",
         "3vnnnaix": "HET-XL",
-        "gypg5gc8": "Baseline",
-        "9jztoaos": "Dropout",
+        "gypg5gc8": "CE Baseline",
+        "9jztoaos": "MC-Dropout",
         "f32n7c05": "SNGP",
         "03coev3u": "DUQ",
         "6r8nfwqc": "Shallow Ens.",
@@ -122,15 +122,12 @@ def main():
             perf_j = performance_matrix[j, :]
             correlation_matrix[i, j] = spearmanr(perf_i, perf_j)[0]
 
-    # Create a mask for the upper triangle
-    mask = np.triu(np.ones_like(correlation_matrix, dtype=bool), k=0)
-
     # Choose a diverging colormap
     cmap = plt.get_cmap("coolwarm")
 
     # Plot the heatmap, applying the mask
     cax = ax.imshow(
-        np.ma.masked_where(mask, correlation_matrix),
+        correlation_matrix,
         interpolation="nearest",
         cmap=cmap,
         vmin=-1,
@@ -141,8 +138,8 @@ def main():
     cbar = fig.colorbar(cax)
     cbar.outline.set_visible(False)
     cbar.ax.tick_params(width=0.1)
-    cbar.set_ticks([-1, -0.5, 0, 0.5, 1])
-    cbar.set_ticklabels(["$-1$", "$-0.5$", "$0$", "$0.5$", "$1$"])
+    cbar.set_ticks([-0.983, 0, 1.01])
+    cbar.set_ticklabels(["-1 (Neg. Corr.)", "0 (No Corr.)", "1 (Pos. Corr.)"])
 
     # Set ticks
     ax.set_xticks(np.arange(len(metric_dict)))
@@ -158,16 +155,15 @@ def main():
     # Loop over data dimensions and create text annotations for only the lower triangle
     for i in range(len(metric_dict)):
         for j in range(len(metric_dict)):
-            if i > j:
-                ax.text(
-                    j,
-                    i,
-                    round(correlation_matrix[i, j], 3),
-                    ha="center",
-                    va="center",
-                    color="black",
-                    fontsize=5,
-                )
+            ax.text(
+                j,
+                i,
+                round(correlation_matrix[i, j], 2),
+                ha="center",
+                va="center",
+                color="black",
+                fontsize=5,
+            )
     ax.spines[["right", "top"]].set_visible(False)
     plt.savefig("results/correlation_matrix/correlation_matrix.pdf")
 

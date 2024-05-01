@@ -142,6 +142,11 @@ class PrefetchLoader:
 
         self.loader = loader
         self.device = device
+
+        self.batch_size = self.loader.batch_size
+        self.dataset = self.loader.dataset
+        self.drop_last = self.loader.drop_last
+
         if fp16:
             # fp16 arg is deprecated, but will override dtype arg if set for bwd compat
             img_dtype = torch.float16
@@ -379,7 +384,7 @@ def create_loader(
     )
     try:
         loader = loader_class(dataset, **loader_args)
-    except TypeError as e:
+    except TypeError:
         loader_args.pop("persistent_workers")  # only in Pytorch 1.7+
         loader = loader_class(dataset, **loader_args)
     if use_prefetcher:

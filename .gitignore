@@ -6,6 +6,7 @@ cifar-10-batches-py
 *.pkl
 wandb
 local_*
+output
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

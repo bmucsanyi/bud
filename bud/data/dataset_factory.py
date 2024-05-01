@@ -129,6 +129,7 @@ def create_dataset(
         if name in _TORCH_BASIC_DS:
             ds_class = _TORCH_BASIC_DS[name]
             use_train = split in _TRAIN_SYNONYM
+            print(torch_kwargs)
             ds = ds_class(train=use_train, **torch_kwargs)
         elif name == "inaturalist" or name == "inat":
             assert (

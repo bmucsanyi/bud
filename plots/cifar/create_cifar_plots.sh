@@ -1,10 +1,10 @@
-python plot_half.py "AUROC" "auroc_hard_bma_correctness" --y-min=0.5 --y-max=1 --correct-auroc --label-offsets Mahalanobis --offset-values 0.1
+python plot_half.py "AUROC" "auroc_hard_bma_correctness" --y-min=0.5 --y-max=1 --correct-auroc --label-offsets Mahalanobis --offset-values 0.13
 
 python plot_half.py "Soft AUROC" "auroc_soft_bma_correctness" --y-min=0.5 --y-max=1 --correct-auroc --label-offsets Mahalanobis --offset-values 0.1
 
-python plot_half.py "AUROC" "auroc_oodness" --y-min=0.5 --y-max=1 --correct-auroc
+python plot_half.py "AUROC" "auroc_oodness" --y-min=0.5 --y-max=1 --correct-auroc --label-offsets "Corr. Pred."  "Shallow Ens." --offset-values 0.21  0.21
 
-python plot_laplace_eu.py
+python plot_gp_eu.py --label-offsets "Corr. Pred." "Shallow Ens." --offset-values 0.22 0.15
 
 python plot_half.py "Accuracy" "hard_bma_accuracy" --y-min=0.5 --y-max=1
 
@@ -18,11 +18,11 @@ python plot_cross.py
 
 python plot_cross_top5.py
 
-python plot_half.py "Rank Correlation" "rank_correlation_bregman_au" --y-min=0 --y-max=1 --correct-abs --label-offsets Mahalanobis --offset-values 0.16
+python plot_half.py "Rank Correlation" "rank_correlation_bregman_au" --y-min=0 --y-max=1 --correct-abs --label-offsets "Shallow Ens." Mahalanobis --offset-values 0.35 0.12
 
 python plot_half.py "Rank Correlation" "rank_correlation_bregman_b_fbar" --y-min=0 --y-max=1 --correct-abs --label-offsets Mahalanobis --offset-values 0.16
 
-python plot_laplace_au.py --label-offsets Mahalanobis --offset-values 0.16
+python plot_gp_au.py --label-offsets Mahalanobis "Shallow Ens." --offset-values 0.12 0.35
 
 python plot_half.py "Rank Correlation" "rank_correlation_bma_au_eu" --y-min=0 --y-max=1 --decreasing --correct-abs --only-posterior
 

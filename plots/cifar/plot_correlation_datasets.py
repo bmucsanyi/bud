@@ -36,6 +36,7 @@ ESTIMATOR_CONVERSION_DICT = {
     "duq_values": r"$u^\text{duq}$",
     "mahalanobis_values": r"$u^\text{mah}$",
     "risk_values": r"$u^\text{rp}$",
+    "gmm_neg_log_densities": r"$u^\text{ddu}$",
     "hard_bma_accuracy": None,
 }
 
@@ -50,8 +51,8 @@ def main():
     method_to_ids = {
         "GP": ("hx2ni3sr", "2vkuhe38"),
         "HET-XL": ("ktze6y0c", "3vnnnaix"),
-        "Baseline": ("7y7e6kjf", "gypg5gc8"),
-        "Dropout": ("f52l00hb", "9jztoaos"),
+        "CE Baseline": ("7y7e6kjf", "gypg5gc8"),
+        "MC-Dropout": ("f52l00hb", "9jztoaos"),
         "SNGP": ("us8v6277", "f32n7c05"),
         "Shallow Ens.": ("795iqrk8", "6r8nfwqc"),
         "Loss Pred.": ("kl7436jj", "960a6hfa"),
@@ -59,17 +60,19 @@ def main():
         "Deep Ens.": ("wzx8xxbn", "ymq2jv64"),
         "Laplace": ("tri75olb", "gkvfnbup"),
         "Mahalanobis": ("somhugzm", "swr2k8kf"),
+        "DDU": ("m3duemay", "jntus4ms"),
+        "Temperature": ("9ggrs462", "n85ctsck"),
     }
 
     metric_dict = {
-        "log_prob_score_hard_bma_correctness": "Log Prob.",
-        "brier_score_hard_bma_correctness": "Brier",
-        "ece_hard_bma_correctness": "-ECE (*)",
         "auroc_hard_bma_correctness": "Correctness",
         "cumulative_hard_bma_abstinence_auc": "Abstinence",
-        "hard_bma_accuracy": "Accuracy",
+        "log_prob_score_hard_bma_correctness": "Log Prob.",
+        "brier_score_hard_bma_correctness": "Brier",
         "rank_correlation_bregman_au": "Aleatoric",
+        "ece_hard_bma_correctness": "-ECE (*)",
         "auroc_oodness": "OOD (*)",
+        "hard_bma_accuracy": "Accuracy",
     }
 
     performance_matrix_imagenet = np.zeros((len(metric_dict), len(method_to_ids), 3))
@@ -153,7 +156,7 @@ def main():
         perf_cifar = performance_matrix_cifar[i, :]
         correlation_vector[i] = spearmanr(perf_imagenet, perf_cifar)[0]
 
-    print(correlation_vector)
+    print([round(asd, 3) for asd in correlation_vector])
 
 
 if __name__ == "__main__":

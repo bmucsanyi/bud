@@ -442,6 +442,12 @@ group.add_argument(
     help='Hessian structure method used by Laplace (default: "kron")',
 )
 group.add_argument(
+    "--link-approx",
+    default="probit",
+    type=str,
+    help='link approximation used by Laplace (default: "probit")',
+)
+group.add_argument(
     "--magnitude",
     default=0.001,
     type=float,
@@ -490,10 +496,16 @@ group.add_argument(
     help="bound of the spectral norm in the SNGP method (default: 1)",
 )
 group.add_argument(
-    "--sngp-version",
-    default="original",
-    type=str,
-    help="SNGP version to use (original/google/due) (default: original)",
+    "--is-batch-norm-spectral-normalized",
+    action="store_true",
+    default=False,
+    help="whether to use spectral normalization in batch norm (default: False)",
+)
+group.add_argument(
+    "--use_tight_norm_for_pointwise_convs",
+    action="store_true",
+    default=False,
+    help="whether to use fully connected spectral normalization for pointwise convs (default: False)",
 )
 group.add_argument(
     "--num-random-features",
@@ -1558,13 +1570,15 @@ def main():
         pred_type=args.pred_type,
         prior_optimization_method=args.prior_optimization_method,
         hessian_structure=args.hessian_structure,
+        link_approx=args.link_approx,
         magnitude=args.magnitude,
         initial_average_kappa=args.initial_average_kappa,
         num_heads=args.num_heads,
         is_spectral_normalized=args.is_spectral_normalized,
         spectral_normalization_iteration=args.spectral_normalization_iteration,
         spectral_normalization_bound=args.spectral_normalization_bound,
-        sngp_version=args.sngp_version,
+        is_batch_norm_spectral_normalized=args.is_batch_norm_spectral_normalized,
+        use_tight_norm_for_pointwise_convs=args.use_tight_norm_for_pointwise_convs,
         num_random_features=args.num_random_features,
         gp_kernel_scale=args.gp_kernel_scale,
         gp_output_bias=args.gp_output_bias,
@@ -1737,8 +1751,8 @@ def main():
             "A version of torch w/ torch.compile() is required for --compile, possibly "
             "a nightly."
         )
-        model = torch.compile(model, backend=args.torchcompile)
-
+        # model = torch.compile(model, backend=args.torchcompile)
+        model.model = torch.compile(model.model)
     # Create the train dataset
     dataset_train = create_dataset(
         name=args.dataset,
@@ -2223,7 +2237,7 @@ def main():
                 loader=loader_id_eval,
                 device=device,
                 amp_autocast=amp_autocast,
-                key_prefix=f"id_eval",
+                key_prefix="id_eval",
                 temp_folder=output_dir,
                 is_same_task=True,
                 is_upstream=True,
@@ -2263,7 +2277,7 @@ def main():
                     loader=loader_id_test,
                     device=device,
                     amp_autocast=amp_autocast,
-                    key_prefix=f"id_test",
+                    key_prefix="id_test",
                     temp_folder=output_dir,
                     is_same_task=True,
                     is_upstream=True,

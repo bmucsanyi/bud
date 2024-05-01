@@ -131,6 +131,7 @@ def plot_and_save_aggregated(
     multiplier = 2 if "Rank" in suffix else 1
     ax.yaxis.set_major_locator(MultipleLocator(0.1 * multiplier))
     ax.yaxis.set_minor_locator(MultipleLocator(0.05 * multiplier))
+    # ax.yaxis.set_major_locator(MultipleLocator(0.5))
 
     bars = ax.bar(
         labels,
@@ -183,7 +184,7 @@ def plot_and_save_aggregated(
         else:
             bar.set_color(np.array([251.0, 188.0, 4.0]) / 255.0)
 
-        if processed_label == "Baseline":
+        if processed_label == "CE Baseline":
             bar.set_color(np.array([154.0, 160.0, 166.0]) / 255.0)
 
     # for i, (_, value) in enumerate(zip(bars, best_values)):
@@ -272,6 +273,9 @@ def main(args):
                             f"_{suffix}", ""
                         )
 
+                        # if method_name == "DDU":
+                        #     print(key, "\t", stripped_key)
+
                         if "mixed" in stripped_key or not (
                             stripped_key in ESTIMATOR_CONVERSION_DICT
                             or stripped_key in ESTIMATORLESS_METRICS
@@ -314,6 +318,8 @@ def main(args):
                     aggregated_key = ESTIMATOR_CONVERSION_DICT["risk_values"]
                 elif method_name == "Mahalanobis":
                     aggregated_key = ESTIMATOR_CONVERSION_DICT["mahalanobis_values"]
+                elif method_name == "DDU" and args.metric == "auroc_oodness":
+                    aggregated_key = ESTIMATOR_CONVERSION_DICT["gmm_neg_log_densities"]
                 else:
                     aggregated_key = ESTIMATOR_CONVERSION_DICT.get(
                         args.distributional_estimator

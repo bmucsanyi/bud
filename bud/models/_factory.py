@@ -2,8 +2,6 @@ import os
 from typing import Any, Dict, Optional, Union
 from urllib.parse import urlsplit
 
-from torch import nn
-
 from bud.layers import set_layer_config
 from bud.wrappers import (
     CorrectnessPredictionWrapper,
@@ -38,6 +36,7 @@ VALID_WRAPPERS = [
     "deterministic",
     "dropout",
     "duq",
+    "ddu",
     "het-xl",
     "laplace",
     "mahalanobis",
@@ -97,13 +96,15 @@ def create_model(
     pred_type,
     prior_optimization_method,
     hessian_structure,
+    link_approx,
     magnitude,
     initial_average_kappa,
     num_heads,
     is_spectral_normalized,
     spectral_normalization_iteration,
     spectral_normalization_bound,
-    sngp_version,
+    is_batch_norm_spectral_normalized,
+    use_tight_norm_for_pointwise_convs,
     num_random_features,
     gp_kernel_scale,
     gp_output_bias,
@@ -230,13 +231,15 @@ def create_model(
         pred_type=pred_type,
         prior_optimization_method=prior_optimization_method,
         hessian_structure=hessian_structure,
+        link_approx=link_approx,
         magnitude=magnitude,
         initial_average_kappa=initial_average_kappa,
         num_heads=num_heads,
         is_spectral_normalized=is_spectral_normalized,
         spectral_normalization_iteration=spectral_normalization_iteration,
         spectral_normalization_bound=spectral_normalization_bound,
-        sngp_version=sngp_version,
+        is_batch_norm_spectral_normalized=is_batch_norm_spectral_normalized,
+        use_tight_norm_for_pointwise_convs=use_tight_norm_for_pointwise_convs,
         num_random_features=num_random_features,
         gp_kernel_scale=gp_kernel_scale,
         gp_output_bias=gp_output_bias,
@@ -276,13 +279,15 @@ def wrap_model(
     pred_type,
     prior_optimization_method,
     hessian_structure,
+    link_approx,
     magnitude,
     initial_average_kappa,
     num_heads,
     is_spectral_normalized,
     spectral_normalization_iteration,
     spectral_normalization_bound,
-    sngp_version,
+    is_batch_norm_spectral_normalized,
+    use_tight_norm_for_pointwise_convs,
     num_random_features,
     gp_kernel_scale,
     gp_output_bias,
@@ -342,6 +347,8 @@ def wrap_model(
             is_spectral_normalized=is_spectral_normalized,
             spectral_normalization_iteration=spectral_normalization_iteration,
             spectral_normalization_bound=spectral_normalization_bound,
+            is_batch_norm_spectral_normalized=is_batch_norm_spectral_normalized,
+            use_tight_norm_for_pointwise_convs=use_tight_norm_for_pointwise_convs,
         )
     elif model_wrapper_name == "het-xl":
         wrapped_model = HETXLWrapper(
@@ -359,6 +366,7 @@ def wrap_model(
             pred_type=pred_type,
             prior_optimization_method=prior_optimization_method,
             hessian_structure=hessian_structure,
+            link_approx=link_approx,
         )
     elif model_wrapper_name == "mahalanobis":
         wrapped_model = MahalanobisWrapper(
@@ -405,9 +413,10 @@ def wrap_model(
         wrapped_model = SNGPWrapper(
             model=model,
             is_spectral_normalized=is_spectral_normalized,
+            use_tight_norm_for_pointwise_convs=use_tight_norm_for_pointwise_convs,
             spectral_normalization_iteration=spectral_normalization_iteration,
             spectral_normalization_bound=spectral_normalization_bound,
-            sngp_version=sngp_version,
+            is_batch_norm_spectral_normalized=is_batch_norm_spectral_normalized,
             num_mc_samples=num_mc_samples,
             num_random_features=num_random_features,
             gp_kernel_scale=gp_kernel_scale,

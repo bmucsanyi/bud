@@ -183,7 +183,7 @@ def plot_and_save_aggregated(
         else:
             bar.set_color(np.array([251.0, 188.0, 4.0]) / 255.0)
 
-        if processed_label == "Baseline":
+        if processed_label == "CE Baseline":
             bar.set_color(np.array([154.0, 160.0, 166.0]) / 255.0)
 
     # for i, (_, value) in enumerate(zip(bars, best_values)):
@@ -209,8 +209,18 @@ def plot_and_save_aggregated(
         ]
 
         # Adding the legend with adjusted handlelength to make the patches more square-like
+        # ax.legend(
+        #     frameon=False,
+        #     handles=legend_handles,
+        #     bbox_to_anchor=(1, 1.17),
+        #     loc="upper right",
+        #     fontsize="small",
+        #     handlelength=1,
+        #     ncol=2,
+        # )
         ax.legend(
             frameon=False,
+            bbox_to_anchor=(1, 1.09),
             handles=legend_handles,
             loc="upper right",
             fontsize="small",
@@ -312,6 +322,10 @@ def main(args):
                     aggregated_key = ESTIMATOR_CONVERSION_DICT["error_probabilities"]
                 elif method_name == "Loss Pred.":
                     aggregated_key = ESTIMATOR_CONVERSION_DICT["risk_values"]
+                elif method_name == "DUQ":
+                    aggregated_key = ESTIMATOR_CONVERSION_DICT["duq_values"]
+                elif method_name == "DDU" and args.metric == "auroc_oodness":
+                    aggregated_key = ESTIMATOR_CONVERSION_DICT["gmm_neg_log_densities"]
                 elif method_name == "Mahalanobis":
                     aggregated_key = ESTIMATOR_CONVERSION_DICT["mahalanobis_values"]
                 else:

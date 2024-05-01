@@ -29,6 +29,7 @@ class LaplaceWrapper(PosteriorWrapper):
         pred_type: str,  # "glm", "nn"
         prior_optimization_method: str,  # "marglik", "CV"
         hessian_structure: str,  # "kron", "full"
+        link_approx: str,  # "probit", "mc"
     ):
         super().__init__(model)
 
@@ -39,6 +40,7 @@ class LaplaceWrapper(PosteriorWrapper):
         self.pred_type = pred_type
         self.prior_optimization_method = prior_optimization_method
         self.hessian_structure = hessian_structure
+        self.link_approx = link_approx
 
         self.load_model()
 
@@ -59,7 +61,9 @@ class LaplaceWrapper(PosteriorWrapper):
         )
         self.laplace_model.fit(train_loader)
         self.laplace_model.optimize_prior_precision(
-            method=self.prior_optimization_method, val_loader=val_loader
+            method=self.prior_optimization_method,
+            val_loader=val_loader,
+            link_approx=self.link_approx,
         )
 
     def forward_head(self, *args, **kwargs):
@@ -80,8 +84,8 @@ class LaplaceWrapper(PosteriorWrapper):
                 "logit": self.laplace_model.predictive_samples(
                     x=inputs, pred_type=self.pred_type, n_samples=self.num_mc_samples
                 )
-                .log()
                 .clamp(min=1e-10)
+                .log()
                 .permute(1, 0, 2),  # [B, S, C]
                 "feature": self.model.forward_head(
                     self.model.forward_features(inputs), pre_logits=True

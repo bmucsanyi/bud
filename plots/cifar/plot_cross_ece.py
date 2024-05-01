@@ -32,10 +32,11 @@ def main():
     api = wandb.Api()
 
     id_to_method = {
-        "2vkuhe38": r"GP $\approx$ SNGP",
+        "2vkuhe38": "GP",
+        "f32n7c05": "SNGP",
         "ymq2jv64": "Deep Ensemble",
-        "9jztoaos": "Dropout",
-        "gypg5gc8": "Baseline",
+        "9jztoaos": "MC-Dropout",
+        "gypg5gc8": "CE Baseline",
     }
 
     dataset_conversion_dict = {

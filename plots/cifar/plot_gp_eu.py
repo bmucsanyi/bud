@@ -21,9 +21,11 @@ from utils import (
 
 from tueplots import bundles
 
-plt.rcParams.update(
-    bundles.icml2022(family="serif", usetex=True, nrows=1, column="half")
-)
+config = bundles.icml2022(family="serif", usetex=True, nrows=1, column="half")
+config["figure.figsize"] = (3.25, 1.25)
+# config["figure.figsize"] = (3.25, 1.4)
+
+plt.rcParams.update(config)
 
 from matplotlib.ticker import MultipleLocator
 
@@ -131,7 +133,7 @@ def plot_and_save_aggregated(
     labels, best_values, error_bars = zip(*combined)
 
     _, ax = plt.subplots()
-    ax.grid(axis="y", which="both", zorder=1)
+    ax.grid(axis="y", which="both", zorder=1, linewidth=0.5)
     # Set major ticks at every 0.1 and minor ticks at every 0.05
     multiplier = 2 if "Rank" in suffix else 1
     ax.yaxis.set_major_locator(MultipleLocator(0.1 * multiplier))
@@ -188,7 +190,7 @@ def plot_and_save_aggregated(
         else:
             bar.set_color(np.array([251.0, 188.0, 4.0]) / 255.0)
 
-        if processed_label == "Baseline":
+        if processed_label == "CE Baseline":
             bar.set_color(np.array([154.0, 160.0, 166.0]) / 255.0)
 
     # for i, (_, value) in enumerate(zip(bars, best_values)):
