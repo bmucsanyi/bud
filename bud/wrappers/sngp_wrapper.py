@@ -993,7 +993,7 @@ class SNGPWrapper(PosteriorWrapper):
         self.classifier = classifier
 
         if is_spectral_normalized:
-            CSN = partial(
+            LSN = partial(
                 LinearSpectralNormalizer,
                 spectral_normalization_iteration=spectral_normalization_iteration,
                 spectral_normalization_bound=spectral_normalization_bound,
@@ -1001,7 +1001,7 @@ class SNGPWrapper(PosteriorWrapper):
                 eps=1e-12,
             )
 
-            LSN = partial(
+            CSN = partial(
                 Conv2dSpectralNormalizer,
                 spectral_normalization_iteration=spectral_normalization_iteration,
                 spectral_normalization_bound=spectral_normalization_bound,
