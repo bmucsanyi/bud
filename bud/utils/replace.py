@@ -123,7 +123,7 @@ def register(
             )
 
         parametrize.register_parametrization(
-            module, attribute_name, target_parametrization(module=module)
+            module, attribute_name, target_parametrization(module=module), unsafe=True
         )
 
 
@@ -168,5 +168,5 @@ def register_cond(
         )
 
         parametrize.register_parametrization(
-            module, attribute_name, target_parametrization(module=module)
+            module, attribute_name, target_parametrization(module=module), unsafe=True
         )
