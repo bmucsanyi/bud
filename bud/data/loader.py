@@ -142,10 +142,6 @@ class PrefetchLoader:
         self.loader = loader
         self.device = device
 
-        self.batch_size = self.loader.batch_size
-        self.dataset = self.loader.dataset
-        self.drop_last = self.loader.drop_last
-
         if fp16:
             # fp16 arg is deprecated, but will override dtype arg if set for bwd compat
             img_dtype = torch.float16
@@ -210,6 +206,14 @@ class PrefetchLoader:
     @property
     def dataset(self):
         return self.loader.dataset
+
+    @property
+    def batch_size(self):
+        return self.loader.batch_size
+
+    @property
+    def drop_last(self):
+        return self.loader.drop_last
 
     @property
     def mixup_enabled(self):
