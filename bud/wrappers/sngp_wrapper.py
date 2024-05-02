@@ -652,7 +652,7 @@ class Conv2dSpectralNormalizer(nn.Module):
                 )
                 flattened_output_shape = math.prod(self.single_output_shape)
 
-                device = self.device
+                device = weight.device
 
                 # Materialize buffers
                 self._u.materialize(shape=flattened_output_shape, device=device)
