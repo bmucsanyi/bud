@@ -1599,6 +1599,7 @@ def main():
         bn_eps=args.bn_eps,
         **args.model_kwargs,
     )
+    logger.info(str(model))
 
     if args.num_classes is None:
         assert hasattr(
