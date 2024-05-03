@@ -24,3 +24,4 @@ from .loss_prediction_wrapper import (
 )
 from .shallow_ensemble_wrapper import ShallowEnsembleWrapper
 from .sngp_wrapper import SNGPWrapper
+from .edl_wrapper import EDLWrapper

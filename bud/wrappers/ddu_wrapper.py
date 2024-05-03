@@ -117,8 +117,12 @@ class DDUWrapper(TemperatureWrapper):
                         covariance_matrix=self.gmm_covariance_matrix,
                     )
 
-                gmm_log_densities = self.gmm.log_prob(features[:, None, :].cpu()).cuda()  # [B, C]
-                gmm_weighted_log_densities = gmm_log_densities + self.classwise_probs.log()
+                gmm_log_densities = self.gmm.log_prob(
+                    features[:, None, :].cpu()
+                ).cuda()  # [B, C]
+                gmm_weighted_log_densities = (
+                    gmm_log_densities + self.classwise_probs.log()
+                )
                 gmm_log_density = gmm_weighted_log_densities.logsumexp(dim=1)
 
             return {
@@ -193,9 +197,7 @@ class DDUWrapper(TemperatureWrapper):
 
         classwise_cov_features = torch.stack(
             [
-                centered_cov(
-                    features[labels == c] - classwise_mean_features[c]
-                )
+                centered_cov(features[labels == c] - classwise_mean_features[c])
                 for c in range(num_classes)
             ]
         )
@@ -225,5 +227,5 @@ class DDUWrapper(TemperatureWrapper):
             break
 
         print("Used jitter:", jitter_eps)
-    
+
         assert self.gmm is not None

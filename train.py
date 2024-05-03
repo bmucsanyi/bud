@@ -50,6 +50,7 @@ from bud.losses import (
     BMACrossEntropyLoss,
     CorrectnessPredictionLoss,
     DUQLoss,
+    EDLLoss,
     FBarCrossEntropyLoss,
     JsdCrossEntropyLoss,
     LabelSmoothingCrossEntropyLoss,
@@ -2108,6 +2109,10 @@ def main():
     elif args.loss == "loss-prediction":
         train_loss_fn = LossPredictionLoss(
             args.lambda_uncertainty_loss, args.is_detach, args.freeze_backbone
+        )
+    elif args.loss == "edl":
+        train_loss_fn = EDLLoss(
+            num_batches=len(loader_train), num_classes=args.num_classes
         )
     else:
         raise NotImplementedError(f"--loss {args.loss} is not implemented.")

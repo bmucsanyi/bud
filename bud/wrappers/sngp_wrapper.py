@@ -480,6 +480,7 @@ class LinearSpectralNormalizer(nn.Module):
     def right_inverse(self, value: torch.Tensor) -> torch.Tensor:
         return value
 
+
 class Conv2dSpectralNormalizer(nn.Module):
     def __init__(
         self,
@@ -664,11 +665,11 @@ class Conv2dSpectralNormalizer(nn.Module):
 
                 # Infer input padding
                 self.left_right_top_bottom_padding = calculate_same_padding(
-                        self.single_output_shape,
-                        self.weight_shape,
-                        self.stride,
-                        self.dilation,
-                    )
+                    self.single_output_shape,
+                    self.weight_shape,
+                    self.stride,
+                    self.dilation,
+                )
                 total_width_height_padding = (
                     self.left_right_top_bottom_padding[0]
                     + self.left_right_top_bottom_padding[1],

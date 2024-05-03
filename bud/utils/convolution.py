@@ -12,8 +12,7 @@ def calculate_output_padding(
     max_sizes = []
     for spatial_dim in range(num_spatial_dims):
         dim_size = (
-            (input_shape[num_non_spatial_dims + spatial_dim] - 1)
-            * stride[spatial_dim]
+            (input_shape[num_non_spatial_dims + spatial_dim] - 1) * stride[spatial_dim]
             - 2 * padding[spatial_dim]
             + (dilation[spatial_dim] if dilation is not None else 1)
             * (kernel_size[spatial_dim] - 1)
@@ -38,6 +37,7 @@ def calculate_output_padding(
         res.append(output_shape[spatial_dim] - min_sizes[spatial_dim])
 
     return tuple(res)
+
 
 def calculate_same_padding(input_shape, filter_shape, stride, dilation):
     """Calculates padding values for 'SAME' padding for conv2d.
@@ -70,16 +70,12 @@ def calculate_same_padding(input_shape, filter_shape, stride, dilation):
     effective_filter_height = filter_height + (filter_height - 1) * (
         dilation_height - 1
     )
-    effective_filter_width = filter_width + (filter_width - 1) * (
-        dilation_width - 1
-    )
+    effective_filter_width = filter_width + (filter_width - 1) * (dilation_width - 1)
 
     if in_height % stride_height == 0:
         pad_along_height = max(effective_filter_height - stride_height, 0)
     else:
-        pad_along_height = max(
-            effective_filter_height - (in_height % stride_height), 0
-        )
+        pad_along_height = max(effective_filter_height - (in_height % stride_height), 0)
 
     if in_width % stride_width == 0:
         pad_along_width = max(effective_filter_width - stride_width, 0)

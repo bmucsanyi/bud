@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-""" ImageNet Validation Script
+"""ImageNet Validation Script
 
 This is intended to be a lean and easily modifiable ImageNet validation script for
 evaluating pretrained models or training checkpoints against ImageNet or similarly
@@ -9,6 +9,7 @@ good performance. Repurpose as you see fit.
 Hacked together by / Copyright 2020 Ross Wightman (https://github.com/rwightman)
                            and 2024 Bálint Mucsányi (https://github.com/bmucsanyi)
 """
+
 import os
 import time
 import warnings
@@ -41,6 +42,7 @@ from bud.wrappers import (
     MahalanobisWrapper,
     MCInfoNCEWrapper,
     NonIsotropicvMFWrapper,
+    EDLWrapper,
 )
 
 # Ignore constant input warning for correlation coefficients.
@@ -1598,6 +1600,35 @@ def get_bundle(
             times["time_risk_value_m"] = time_risk_value_m
             risk_values = torch.empty(num_samples)
             estimates["risk_values"] = risk_values
+        elif isinstance(model, EDLWrapper):
+            time_dirichlet_scaled_inverse_precision_m = AverageMeter()
+            times[
+                "time_dirichlet_scaled_inverse_precision_m"
+            ] = time_dirichlet_scaled_inverse_precision_m
+            time_dirichlet_expected_entropy_m = AverageMeter()
+            times[
+                "time_dirichlet_expected_entropy_m"
+            ] = time_dirichlet_expected_entropy_m
+            time_dirichlet_entropy_of_expectation_m = AverageMeter
+            times[
+                "time_dirichlet_entropy_of_expectation_m"
+            ] = time_dirichlet_entropy_of_expectation_m
+            time_dirichlet_mutual_information_m = AverageMeter()
+            times[
+                "time_dirichlet_mutual_information_m"
+            ] = time_dirichlet_mutual_information_m
+            dirichlet_scaled_inverse_precisions = torch.empty(num_samples)
+            estimates[
+                "dirichlet_scaled_inverse_precisions"
+            ] = dirichlet_scaled_inverse_precisions
+            dirichlet_expected_entropies = torch.empty(num_samples)
+            estimates["dirichlet_expected_entropies"] = dirichlet_expected_entropies
+            dirichlet_entropy_of_expectations = torch.empty(num_samples)
+            estimates[
+                "dirichlet_entropy_of_expectations"
+            ] = dirichlet_entropy_of_expectations
+            dirichlet_mutual_informations = torch.empty(num_samples)
+            estimates["dirichlet_mutual_informations"] = dirichlet_mutual_informations
         elif isinstance(model, DDUWrapper):
             time_gmm_neg_log_density_m = AverageMeter()
             times["time_gmm_neg_log_density_m"] = time_gmm_neg_log_density_m
@@ -1708,6 +1739,20 @@ def get_bundle(
                     batch_size=batch_size,
                     time_risk_value_m=time_risk_value_m,
                     risk_values=risk_values,
+                )
+            elif isinstance(model, EDLWrapper):
+                update_dirichlet(
+                    inference_dict=inference_dict,
+                    indices=indices,
+                    batch_size=batch_size,
+                    time_dirichlet_scaled_inverse_precision_m=time_dirichlet_scaled_inverse_precision_m,
+                    time_dirichlet_expected_entropy_m=time_dirichlet_expected_entropy_m,
+                    time_dirichlet_entropy_of_expectation_m=time_dirichlet_entropy_of_expectation_m,
+                    time_dirichlet_mutual_information_m=time_dirichlet_mutual_information_m,
+                    dirichlet_scaled_inverse_precisions=dirichlet_scaled_inverse_precisions,
+                    dirichlet_expected_entropies=dirichlet_expected_entropies,
+                    dirichlet_entropy_of_expectations=dirichlet_entropy_of_expectations,
+                    dirichlet_mutual_informations=dirichlet_mutual_informations,
                 )
             elif isinstance(model, DDUWrapper):
                 update_ddu(
@@ -2036,7 +2081,17 @@ def convert_inference_dict(model, inference_dict, base_time):
             logits = logits.unsqueeze(dim=1)  # [B, 1, C]
 
         time_log_probs_start = time.perf_counter()
-        log_probs = F.log_softmax(logits, dim=-1)  # [B, S, C]
+
+        min_real = torch.finfo(logits.dtype).min
+
+        if isinstance(model, EDLWrapper):
+            alphas = logits.squeeze().clamp(-10, 10).exp().add(1)  # [B, C]
+            sum_alphas = alphas.sum(dim=2)  # [B]
+            mean_alphas = alphas.div(sum_alphas.unsqueeze(1))  # [B, C]
+            log_probs = mean_alphas.log().clamp(min=min_real).unsqueeze(1)  # [B, 1, C]
+        else:
+            log_probs = F.log_softmax(logits, dim=-1)  # [B, S, C]
+
         time_log_probs_end = time.perf_counter()
         time_log_probs = time_log_probs_end - time_log_probs_start + base_time
 
@@ -2046,7 +2101,12 @@ def convert_inference_dict(model, inference_dict, base_time):
         time_probs = time_probs_end - time_probs_start + time_log_probs
 
         time_log_fbar_start = time.perf_counter()
-        log_fbar = F.log_softmax(log_probs.mean(dim=1), dim=-1)  # [B, C]
+
+        if isinstance(model, EDLWrapper):
+            log_fbar = log_probs.mean(dim=1)  # [B, C]
+        else:
+            log_fbar = F.log_softmax(log_probs.mean(dim=1), dim=-1)  # [B, C]
+
         time_log_fbar_end = time.perf_counter()
         time_log_fbar = time_log_fbar_end - time_log_fbar_start + time_log_probs
 
@@ -2062,7 +2122,6 @@ def convert_inference_dict(model, inference_dict, base_time):
         time_bma = time_bma_end - time_bma_start + time_probs
 
         log_bma = bma.log()  # [B, C]
-        min_real = torch.finfo(log_bma.dtype).min
         log_bma = torch.clamp(log_bma, min=min_real)
         converted_inference_dict["log_bma"] = log_bma
 
@@ -2159,6 +2218,27 @@ def convert_inference_dict(model, inference_dict, base_time):
         elif isinstance(model, BaseLossPredictionWrapper):
             converted_inference_dict["risk_value"] = inference_dict["risk_value"]
             converted_inference_dict["time_risk_value"] = base_time
+        elif isinstance(model, EDLWrapper):
+            converted_inference_dict[
+                "dirichlet_scaled_inverse_precision"
+            ] = inference_dict["dirichlet_scaled_inverse_precision"]
+            converted_inference_dict["dirichlet_expected_entropy"] = inference_dict[
+                "dirichlet_expected_entropy"
+            ]
+            converted_inference_dict[
+                "dirichlet_entropy_of_expectation"
+            ] = inference_dict["dirichlet_entropy_of_expectation"]
+            converted_inference_dict["dirichlet_mutual_information"] = inference_dict[
+                "dirichlet_mutual_information"
+            ]
+            converted_inference_dict[
+                "time_dirichlet_scaled_inverse_precision"
+            ] = base_time
+            converted_inference_dict["time_dirichlet_expected_entropy"] = base_time
+            converted_inference_dict[
+                "time_dirichlet_entropy_of_expectation"
+            ] = base_time
+            converted_inference_dict["time_dirichlet_mutual_information"] = base_time
         elif isinstance(model, DDUWrapper):
             converted_inference_dict["gmm_neg_log_density"] = inference_dict[
                 "gmm_neg_log_density"
@@ -2257,6 +2337,43 @@ def update_losspred(
 ):
     time_risk_value_m.update(inference_dict["time_risk_value"], batch_size)
     risk_values[indices] = inference_dict["risk_value"]
+
+
+def update_dirichlet(
+    inference_dict,
+    indices,
+    batch_size,
+    time_dirichlet_scaled_inverse_precision_m,
+    time_dirichlet_expected_entropy_m,
+    time_dirichlet_entropy_of_expectation_m,
+    time_dirichlet_mutual_information_m,
+    dirichlet_scaled_inverse_precisions,
+    dirichlet_expected_entropies,
+    dirichlet_entropy_of_expectations,
+    dirichlet_mutual_informations,
+):
+    time_dirichlet_scaled_inverse_precision_m.update(
+        inference_dict["time_dirichlet_scaled_inverse_precision"], batch_size
+    )
+    time_dirichlet_expected_entropy_m.update(
+        inference_dict["time_dirichlet_expected_entropy"], batch_size
+    )
+    time_dirichlet_entropy_of_expectation_m.update(
+        inference_dict["time_dirichlet_entropy_of_expectation"], batch_size
+    )
+    time_dirichlet_mutual_information_m.update(
+        inference_dict["time_dirichlet_mutual_information"], batch_size
+    )
+    dirichlet_scaled_inverse_precisions[indices] = inference_dict[
+        "dirichlet_scaled_inverse_precision"
+    ]
+    dirichlet_expected_entropies[indices] = inference_dict["dirichlet_expected_entropy"]
+    dirichlet_entropy_of_expectations[indices] = inference_dict[
+        "dirichlet_entropy_of_expectation"
+    ]
+    dirichlet_mutual_informations[indices] = inference_dict[
+        "dirichlet_mutual_information"
+    ]
 
 
 def update_ddu(
