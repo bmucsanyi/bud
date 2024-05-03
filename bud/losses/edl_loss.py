@@ -30,7 +30,9 @@ class EDLLoss(nn.Module):
 
         kullback_leibler_term = (
             alpha_tildes.sub(self.uniform_alphas)  # [B, C]
-            .mul(digamma_alpha_tildes.sub(digamma_sum_alpha_tildes))  # [B, C]
+            .mul(
+                digamma_alpha_tildes.sub(digamma_sum_alpha_tildes.unsqueeze(1))
+            )  # [B, C]
             .sum(dim=1)  # [B, 1]
             .sub(log_b_alpha_tildes)  # [B]
             .add(self.log_b_uniform_alphas)  # [B]
