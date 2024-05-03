@@ -21,6 +21,7 @@ from bud.wrappers import (
     LossPredictionWrapper,
     ShallowEnsembleWrapper,
     SNGPWrapper,
+    EDLWrapper,
 )
 
 from ._helpers import load_checkpoint
@@ -397,6 +398,8 @@ def wrap_model(
             mlp_depth=mlp_depth,
             stopgrad=stopgrad,
         )
+    elif model_wrapper_name == "edl":
+        wrapped_model = EDLWrapper(model=model)
     elif model_wrapper_name == "deep-risk-prediction":
         wrapped_model = DeepLossPredictionWrapper(
             model=model,
