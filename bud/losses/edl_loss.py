@@ -5,6 +5,8 @@ import torch.nn.functional as F
 
 class EDLLoss(nn.Module):
     def __init__(self, num_batches: int, num_classes: int) -> None:
+        super().__init__()
+
         self.curr_step = 0
         self.max_step = 10 * num_batches
         self.register_buffer("uniform_alphas", torch.ones((num_classes,)))  # [C]
