@@ -2081,7 +2081,7 @@ def convert_inference_dict(model, inference_dict, base_time):
         min_real = torch.finfo(features.dtype).min
 
         if isinstance(model, DirichletWrapper):
-            mean_alphas = inference_dict["mean_alphas"]
+            mean_alphas = inference_dict["mean_alpha"]
             log_probs = mean_alphas.log().clamp(min=min_real).unsqueeze(1)  # [B, 1, C]
         else:
             logits = inference_dict["logit"]
