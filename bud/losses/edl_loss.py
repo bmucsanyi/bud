@@ -40,8 +40,7 @@ class EDLLoss(nn.Module):
 
         return kullback_leibler_term  # [B]
 
-    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-        alphas = logits.clamp(-10, 10).exp().add(1)  # [B, C]
+    def forward(self, alphas: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         sum_alphas = alphas.sum(dim=1)  # [B]
         mean_alphas = alphas.div(sum_alphas.unsqueeze(1))  # [B, C]
 

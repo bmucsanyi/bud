@@ -22,6 +22,7 @@ from bud.wrappers import (
     ShallowEnsembleWrapper,
     SNGPWrapper,
     EDLWrapper,
+    PostNetWrapper,
 )
 
 from ._helpers import load_checkpoint
@@ -114,6 +115,8 @@ def create_model(
     gp_cov_momentum,
     gp_cov_ridge_penalty,
     gp_input_dim,
+    postnet_latent_dim,
+    postnet_num_density_components,
     use_pretrained,
     checkpoint_path: str,
     pretrained_cfg: Optional[Union[str, Dict[str, Any], PretrainedCfg]] = None,
@@ -249,6 +252,8 @@ def create_model(
         gp_cov_momentum=gp_cov_momentum,
         gp_cov_ridge_penalty=gp_cov_ridge_penalty,
         gp_input_dim=gp_input_dim,
+        postnet_latent_dim=postnet_latent_dim,
+        postnet_num_density_components=postnet_num_density_components,
         use_pretrained=use_pretrained,
         kwargs=kwargs,
     )
@@ -297,6 +302,8 @@ def wrap_model(
     gp_cov_momentum,
     gp_cov_ridge_penalty,
     gp_input_dim,
+    postnet_latent_dim,
+    postnet_num_density_components,
     use_pretrained,
     kwargs,
 ):
@@ -400,6 +407,13 @@ def wrap_model(
         )
     elif model_wrapper_name == "edl":
         wrapped_model = EDLWrapper(model=model)
+    elif model_wrapper_name == "postnet":
+        wrapped_model = PostNetWrapper(
+            model=model,
+            latent_dim=postnet_latent_dim,
+            hidden_dim=num_hidden_features,
+            num_density_components=postnet_num_density_components,
+        )
     elif model_wrapper_name == "deep-risk-prediction":
         wrapped_model = DeepLossPredictionWrapper(
             model=model,

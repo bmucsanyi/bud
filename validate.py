@@ -43,6 +43,7 @@ from bud.wrappers import (
     MCInfoNCEWrapper,
     NonIsotropicvMFWrapper,
     EDLWrapper,
+    DirichletWrapper,
 )
 
 # Ignore constant input warning for correlation coefficients.
@@ -1600,7 +1601,7 @@ def get_bundle(
             times["time_risk_value_m"] = time_risk_value_m
             risk_values = torch.empty(num_samples)
             estimates["risk_values"] = risk_values
-        elif isinstance(model, EDLWrapper):
+        elif isinstance(model, DirichletWrapper):
             time_dirichlet_scaled_inverse_precision_m = AverageMeter()
             times[
                 "time_dirichlet_scaled_inverse_precision_m"
@@ -1740,7 +1741,7 @@ def get_bundle(
                     time_risk_value_m=time_risk_value_m,
                     risk_values=risk_values,
                 )
-            elif isinstance(model, EDLWrapper):
+            elif isinstance(model, DirichletWrapper):
                 update_dirichlet(
                     inference_dict=inference_dict,
                     indices=indices,
@@ -2075,21 +2076,17 @@ def convert_inference_dict(model, inference_dict, base_time):
     converted_inference_dict["feature"] = features
 
     if not isinstance(model, MCInfoNCEWrapper):
-        logits = inference_dict["logit"]
-
-        if logits.dim() == 2:  # [B, C]
-            logits = logits.unsqueeze(dim=1)  # [B, 1, C]
-
         time_log_probs_start = time.perf_counter()
 
-        min_real = torch.finfo(logits.dtype).min
+        min_real = torch.finfo(features.dtype).min
 
-        if isinstance(model, EDLWrapper):
-            alphas = logits.squeeze().clamp(-10, 10).exp().add(1)  # [B, C]
-            sum_alphas = alphas.sum(dim=2)  # [B]
-            mean_alphas = alphas.div(sum_alphas.unsqueeze(1))  # [B, C]
+        if isinstance(model, DirichletWrapper):
+            mean_alphas = inference_dict["mean_alphas"]
             log_probs = mean_alphas.log().clamp(min=min_real).unsqueeze(1)  # [B, 1, C]
         else:
+            logits = inference_dict["logit"]
+            if logits.dim() == 2:  # [B, C]
+                logits = logits.unsqueeze(dim=1)  # [B, 1, C]
             log_probs = F.log_softmax(logits, dim=-1)  # [B, S, C]
 
         time_log_probs_end = time.perf_counter()
@@ -2102,10 +2099,7 @@ def convert_inference_dict(model, inference_dict, base_time):
 
         time_log_fbar_start = time.perf_counter()
 
-        if isinstance(model, EDLWrapper):
-            log_fbar = log_probs.mean(dim=1)  # [B, C]
-        else:
-            log_fbar = F.log_softmax(log_probs.mean(dim=1), dim=-1)  # [B, C]
+        log_fbar = F.log_softmax(log_probs.mean(dim=1), dim=-1)  # [B, C]
 
         time_log_fbar_end = time.perf_counter()
         time_log_fbar = time_log_fbar_end - time_log_fbar_start + time_log_probs
@@ -2192,9 +2186,6 @@ def convert_inference_dict(model, inference_dict, base_time):
         converted_inference_dict["max_prob_of_fbar"] = max_prob_of_fbar
         converted_inference_dict["time_max_prob_of_fbar"] = time_max_prob_of_fbar
 
-        # correlation plots between different metrics in wandb
-        # add panel => scatter plot
-
         time_jsd_start = time.perf_counter()
         jensen_shannon_divergence = entropy_of_bma - expected_entropy
         time_jsd_end = time.perf_counter()
@@ -2218,7 +2209,7 @@ def convert_inference_dict(model, inference_dict, base_time):
         elif isinstance(model, BaseLossPredictionWrapper):
             converted_inference_dict["risk_value"] = inference_dict["risk_value"]
             converted_inference_dict["time_risk_value"] = base_time
-        elif isinstance(model, EDLWrapper):
+        elif isinstance(model, DirichletWrapper):
             converted_inference_dict[
                 "dirichlet_scaled_inverse_precision"
             ] = inference_dict["dirichlet_scaled_inverse_precision"]

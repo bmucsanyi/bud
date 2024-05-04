@@ -51,6 +51,7 @@ from bud.losses import (
     CorrectnessPredictionLoss,
     DUQLoss,
     EDLLoss,
+    UCELoss,
     FBarCrossEntropyLoss,
     JsdCrossEntropyLoss,
     LabelSmoothingCrossEntropyLoss,
@@ -77,6 +78,7 @@ from bud.wrappers import (
     MCInfoNCEWrapper,
     NonIsotropicvMFWrapper,
     SNGPWrapper,
+    PostNetWrapper
 )
 from validate import evaluate, evaluate_bulk
 
@@ -556,6 +558,18 @@ group.add_argument(
     default=128,
     type=int,
     help="input dimension to the GP (if > 0, use random projection) (default: 128)",
+)
+group.add_argument(
+    "--postnet-latent-dim",
+    default=6,
+    type=int,
+    help="latent dimensionality in PostNet (default: 6)",
+)
+group.add_argument(
+    "--postnet-num-density-components",
+    default=6,
+    type=int,
+    help="number of density components in PostNet's flow (default: 6)",
 )
 group.add_argument(
     "--is-reset-classifier",
@@ -1253,6 +1267,12 @@ group.add_argument(
     metavar="PCT",
     help="drop block rate (default: None)",
 )
+group.add_argument(
+    "--uce-regularization-factor",
+    type=float,
+    default=1e-5,
+    help="UCE regularization factor for PostNets (default: 1e-5)",
+)
 
 # Batch norm parameters (only works with gen_efficientnet based models currently)
 group = parser.add_argument_group(
@@ -1588,6 +1608,8 @@ def main():
         gp_cov_momentum=args.gp_cov_momentum,
         gp_cov_ridge_penalty=args.gp_cov_ridge_penalty,
         gp_input_dim=args.gp_input_dim,
+        postnet_latent_dim=args.postnet_latent_dim,
+        postnet_num_density_components=args.postnet_num_density_components,
         use_pretrained=args.use_pretrained,
         checkpoint_path=args.initial_checkpoint,
         in_chans=in_chans,
@@ -1944,6 +1966,9 @@ def main():
         ),
     )
 
+    if isinstance(model, PostNetWrapper):
+        model.calculate_sample_counts(loader_train)
+
     loader_id_eval = create_loader(
         dataset_id_eval,
         dataset_name=args.dataset_id,
@@ -2113,6 +2138,10 @@ def main():
     elif args.loss == "edl":
         train_loss_fn = EDLLoss(
             num_batches=len(loader_train), num_classes=args.num_classes
+        )
+    elif args.loss == "uce":
+        train_loss_fn = UCELoss(
+            regularization_factor=args.uce_regularization_factor
         )
     else:
         raise NotImplementedError(f"--loss {args.loss} is not implemented.")

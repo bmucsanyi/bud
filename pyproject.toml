@@ -24,6 +24,7 @@ faiss-cpu = "^1.7.4"
 huggingface-hub = "^0.18.0"
 laplace-torch = "^0.1a2"
 openpyxl = "^3.1.2"
+pyro-ppl = "^1.9.0"
 
 
 [tool.poetry.group.dev.dependencies]

@@ -7,6 +7,7 @@ cifar-10-batches-py
 wandb
 local_*
 output
+bud/data/datasets
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
