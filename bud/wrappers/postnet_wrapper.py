@@ -46,6 +46,7 @@ class PostNetWrapper(DirichletWrapper):
         # TODO: come back to check if these are needed/useful
         self.register_buffer("sample_count_per_class", None)
         self.latent_dim = latent_dim
+        self.num_features = latent_dim  # For compatibility
         self.hidden_dim = hidden_dim
         self.num_density_components = num_density_components
         self.num_classes = model.num_classes
