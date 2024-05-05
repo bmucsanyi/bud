@@ -1610,7 +1610,7 @@ def get_bundle(
             times[
                 "time_dirichlet_expected_entropy_m"
             ] = time_dirichlet_expected_entropy_m
-            time_dirichlet_entropy_of_expectation_m = AverageMeter
+            time_dirichlet_entropy_of_expectation_m = AverageMeter()
             times[
                 "time_dirichlet_entropy_of_expectation_m"
             ] = time_dirichlet_entropy_of_expectation_m
