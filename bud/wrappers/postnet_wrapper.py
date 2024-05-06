@@ -245,15 +245,15 @@ class PostNetWrapper(DirichletWrapper):
 
     def calculate_sample_counts(self, train_loader):
         device = next(self.model.parameters()).device
-        self.sample_count_per_class = torch.zeros((self.num_classes))
+        sample_count_per_class = torch.zeros((self.num_classes))
 
         for _, targets in train_loader:
             targets = targets.cpu()
-            self.sample_count_per_class.scatter_add_(
+            sample_count_per_class.scatter_add_(
                 0, targets, torch.ones_like(targets, dtype=torch.float)
             )
 
-        self.sample_count_per_class.to(device)
+        self.sample_count_per_class = sample_count_per_class.to(device)
         print(self.sample_count_per_class)
 
     def forward_head(self, x, pre_logits: bool = False):
