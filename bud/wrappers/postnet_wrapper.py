@@ -279,7 +279,6 @@ class PostNetWrapper(DirichletWrapper):
                     1 + self.sample_count_per_class[c] * log_probs[:, c].exp()
                 )
         else:
-            # TODO: implement for imagenet, current one likely infeasible
             log_probs = self.density_estimator.log_prob(features)  # [C, B]
             alphas = (
                 1 + self.sample_count_per_class.unsqueeze(1).mul(log_probs.exp()).T

@@ -3,6 +3,7 @@ from torch import nn
 
 from bud.wrappers.model_wrapper import DirichletWrapper
 from bud.utils import entropy
+import torch.nn.functional as F
 
 
 class EDLWrapper(DirichletWrapper):
@@ -24,7 +25,7 @@ class EDLWrapper(DirichletWrapper):
             return features
 
         logits = self.get_classifier()(features)
-        alphas = logits.clamp(-10, 10).exp().add(1)  # [B, C]
+        alphas = F.softplus(logits).add(1)  # [B, C]
 
         if self.training:
             return alphas
