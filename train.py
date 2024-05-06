@@ -1288,8 +1288,8 @@ group.add_argument(
 group.add_argument(
     "--edl-activation",
     type=str,
-    default="softplus",
-    help='EDL final activation function (default: "softplus")',
+    default="exp",
+    help='EDL final activation function (default: "exp")',
 )
 
 # Batch norm parameters (only works with gen_efficientnet based models currently)
