@@ -20,7 +20,7 @@ class UCELoss(nn.Module):
             torch.sum(
                 targets_one_hot
                 * (torch.digamma(sum_alphas.unsqueeze(1)) - torch.digamma(alphas)),
-                dim=1
+                dim=1,
             ).mean()
             - self.regularization_factor * entropy_regularizer.mean()
         )

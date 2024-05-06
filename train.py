@@ -78,7 +78,7 @@ from bud.wrappers import (
     MCInfoNCEWrapper,
     NonIsotropicvMFWrapper,
     SNGPWrapper,
-    PostNetWrapper
+    PostNetWrapper,
 )
 from validate import evaluate, evaluate_bulk
 
@@ -570,6 +570,12 @@ group.add_argument(
     default=6,
     type=int,
     help="number of density components in PostNet's flow (default: 6)",
+)
+group.add_argument(
+    "--postnet-is-batched",
+    action="store_true",
+    default=False,
+    help=("whether the flow in PostNet is batched (default: False)"),
 )
 group.add_argument(
     "--is-reset-classifier",
@@ -1610,6 +1616,7 @@ def main():
         gp_input_dim=args.gp_input_dim,
         postnet_latent_dim=args.postnet_latent_dim,
         postnet_num_density_components=args.postnet_num_density_components,
+        postnet_is_batched=args.postnet_is_batched,
         use_pretrained=args.use_pretrained,
         checkpoint_path=args.initial_checkpoint,
         in_chans=in_chans,
@@ -2140,9 +2147,7 @@ def main():
             num_batches=len(loader_train), num_classes=args.num_classes
         )
     elif args.loss == "uce":
-        train_loss_fn = UCELoss(
-            regularization_factor=args.uce_regularization_factor
-        )
+        train_loss_fn = UCELoss(regularization_factor=args.uce_regularization_factor)
     else:
         raise NotImplementedError(f"--loss {args.loss} is not implemented.")
     train_loss_fn = train_loss_fn.to(device=device)

@@ -117,6 +117,7 @@ def create_model(
     gp_input_dim,
     postnet_latent_dim,
     postnet_num_density_components,
+    postnet_is_batched,
     use_pretrained,
     checkpoint_path: str,
     pretrained_cfg: Optional[Union[str, Dict[str, Any], PretrainedCfg]] = None,
@@ -254,6 +255,7 @@ def create_model(
         gp_input_dim=gp_input_dim,
         postnet_latent_dim=postnet_latent_dim,
         postnet_num_density_components=postnet_num_density_components,
+        postnet_is_batched=postnet_is_batched,
         use_pretrained=use_pretrained,
         kwargs=kwargs,
     )
@@ -304,6 +306,7 @@ def wrap_model(
     gp_input_dim,
     postnet_latent_dim,
     postnet_num_density_components,
+    postnet_is_batched,
     use_pretrained,
     kwargs,
 ):
@@ -413,6 +416,7 @@ def wrap_model(
             latent_dim=postnet_latent_dim,
             hidden_dim=num_hidden_features,
             num_density_components=postnet_num_density_components,
+            is_batched=postnet_is_batched,
         )
     elif model_wrapper_name == "deep-risk-prediction":
         wrapped_model = DeepLossPredictionWrapper(
