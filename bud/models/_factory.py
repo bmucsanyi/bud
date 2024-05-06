@@ -118,6 +118,7 @@ def create_model(
     postnet_latent_dim,
     postnet_num_density_components,
     postnet_is_batched,
+    edl_activation,
     use_pretrained,
     checkpoint_path: str,
     pretrained_cfg: Optional[Union[str, Dict[str, Any], PretrainedCfg]] = None,
@@ -256,6 +257,7 @@ def create_model(
         postnet_latent_dim=postnet_latent_dim,
         postnet_num_density_components=postnet_num_density_components,
         postnet_is_batched=postnet_is_batched,
+        edl_activation=edl_activation,
         use_pretrained=use_pretrained,
         kwargs=kwargs,
     )
@@ -307,6 +309,7 @@ def wrap_model(
     postnet_latent_dim,
     postnet_num_density_components,
     postnet_is_batched,
+    edl_activation,
     use_pretrained,
     kwargs,
 ):
@@ -409,7 +412,7 @@ def wrap_model(
             stopgrad=stopgrad,
         )
     elif model_wrapper_name == "edl":
-        wrapped_model = EDLWrapper(model=model)
+        wrapped_model = EDLWrapper(model=model, activation=edl_activation)
     elif model_wrapper_name == "postnet":
         wrapped_model = PostNetWrapper(
             model=model,

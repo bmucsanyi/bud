@@ -14,8 +14,17 @@ class EDLWrapper(DirichletWrapper):
     def __init__(
         self,
         model: nn.Module,
+        activation: str,
     ):
         super().__init__(model)
+        self.model.reset_classifier(self.model.num_classes)
+        
+        if activation == "exp":
+            self._activation = lambda x: x.clamp(-10, 10).exp()
+        elif activation == "softplus":
+            self._activation = F.softplus
+        else:
+            raise ValueError(f'Invalid activation "{activation}" provided')
 
     def forward_head(self, x, pre_logits: bool = False):
         # Always get pre_logits
@@ -25,7 +34,7 @@ class EDLWrapper(DirichletWrapper):
             return features
 
         logits = self.get_classifier()(features)
-        alphas = F.softplus(logits).add(1)  # [B, C]
+        alphas = self._activation(logits).add(1)  # [B, C]
 
         if self.training:
             return alphas

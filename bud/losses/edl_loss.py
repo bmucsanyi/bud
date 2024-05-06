@@ -4,11 +4,15 @@ import torch.nn.functional as F
 
 
 class EDLLoss(nn.Module):
-    def __init__(self, num_batches: int, num_classes: int) -> None:
+    def __init__(self, num_batches: int, num_classes: int, start_epoch: int) -> None:
         super().__init__()
 
+        self.curr_batch = 1
         self.curr_step = 0
         self.max_step = 10 * num_batches
+        self.num_batches = num_batches
+        self.curr_epoch = 1
+        self.start_epoch = start_epoch
         self.register_buffer("uniform_alphas", torch.ones((num_classes,)))  # [C]
         self.register_buffer(
             "sum_uniform_alphas", torch.tensor(num_classes, dtype=torch.float32)
@@ -51,13 +55,20 @@ class EDLLoss(nn.Module):
             mean_alphas.mul(1 - mean_alphas).sum(dim=1).div(sum_alphas + 1)
         )  # [B]
 
-        annealing_coefficient = min(1, self.curr_step / self.max_step)
-        self.curr_step += 1
+        loss = error_term + variance_term
 
-        alpha_tildes = alphas.sub(1).mul(1 - targets_one_hot).add(1)  # [B, C]
+        if self.curr_epoch >= self.start_epoch:
+            annealing_coefficient = min(1, self.curr_step / self.max_step)
+            alpha_tildes = alphas.sub(1).mul(1 - targets_one_hot).add(1)  # [B, C]
+            kullback_leibler_term = self.kullback_leibler_term(alpha_tildes)  # [B]
 
-        kullback_leibler_term = self.kullback_leibler_term(alpha_tildes)  # [B]
+            loss = loss + annealing_coefficient * kullback_leibler_term
 
-        return (
-            error_term + variance_term + annealing_coefficient * kullback_leibler_term
-        ).mean()  # []
+            self.curr_step += 1
+
+        self.curr_batch += 1
+        if self.curr_batch == self.num_batches:
+            self.curr_epoch += 1
+            self.curr_batch = 1
+
+        return loss.mean()  # []

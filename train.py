@@ -1279,6 +1279,18 @@ group.add_argument(
     default=1e-5,
     help="UCE regularization factor for PostNets (default: 1e-5)",
 )
+group.add_argument(
+    "--edl-start-epoch",
+    type=int,
+    default=1,
+    help="start epoch for the EDL flatness regularizer (default: 1)",
+)
+group.add_argument(
+    "--edl-activation",
+    type=str,
+    default="exp",
+    help='EDL final activation function (default: "exp")',
+)
 
 # Batch norm parameters (only works with gen_efficientnet based models currently)
 group = parser.add_argument_group(
@@ -1617,6 +1629,7 @@ def main():
         postnet_latent_dim=args.postnet_latent_dim,
         postnet_num_density_components=args.postnet_num_density_components,
         postnet_is_batched=args.postnet_is_batched,
+        edl_activation=args.edl_activation,
         use_pretrained=args.use_pretrained,
         checkpoint_path=args.initial_checkpoint,
         in_chans=in_chans,
@@ -2144,7 +2157,9 @@ def main():
         )
     elif args.loss == "edl":
         train_loss_fn = EDLLoss(
-            num_batches=len(loader_train), num_classes=args.num_classes
+            num_batches=len(loader_train),
+            num_classes=args.num_classes,
+            start_epoch=args.edl_start_epoch,
         )
     elif args.loss == "uce":
         train_loss_fn = UCELoss(regularization_factor=args.uce_regularization_factor)
