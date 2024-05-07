@@ -4,7 +4,7 @@ import torch.nn.functional as F
 
 
 class EDLLoss(nn.Module):
-    def __init__(self, num_batches: int, num_classes: int, start_epoch: int) -> None:
+    def __init__(self, num_batches: int, num_classes: int, start_epoch: int, scaler: float) -> None:
         super().__init__()
 
         self.curr_batch = 1
@@ -13,6 +13,7 @@ class EDLLoss(nn.Module):
         self.num_batches = num_batches
         self.curr_epoch = 1
         self.start_epoch = start_epoch
+        self.scaler = scaler
         self.register_buffer("uniform_alphas", torch.ones((num_classes,)))  # [C]
         self.register_buffer(
             "sum_uniform_alphas", torch.tensor(num_classes, dtype=torch.float32)
@@ -62,7 +63,7 @@ class EDLLoss(nn.Module):
             alpha_tildes = alphas.sub(1).mul(1 - targets_one_hot).add(1)  # [B, C]
             kullback_leibler_term = self.kullback_leibler_term(alpha_tildes)  # [B]
 
-            loss = loss + annealing_coefficient * kullback_leibler_term
+            loss = loss + annealing_coefficient * self.scaler * kullback_leibler_term
 
             self.curr_step += 1
 

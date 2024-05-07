@@ -1286,6 +1286,12 @@ group.add_argument(
     help="start epoch for the EDL flatness regularizer (default: 1)",
 )
 group.add_argument(
+    "--edl-scaler",
+    type=float,
+    default=1,
+    help="scaler for the EDL flatness regularizer (default: 1)",
+)
+group.add_argument(
     "--edl-activation",
     type=str,
     default="exp",
@@ -2160,6 +2166,7 @@ def main():
             num_batches=len(loader_train),
             num_classes=args.num_classes,
             start_epoch=args.edl_start_epoch,
+            scaler=args.edl_scaler,
         )
     elif args.loss == "uce":
         train_loss_fn = UCELoss(regularization_factor=args.uce_regularization_factor)
