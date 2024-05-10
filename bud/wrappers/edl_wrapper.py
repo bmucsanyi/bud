@@ -17,8 +17,7 @@ class EDLWrapper(DirichletWrapper):
         activation: str,
     ):
         super().__init__(model)
-        self.model.reset_classifier(self.model.num_classes)
-        
+
         if activation == "exp":
             self._activation = lambda x: x.clamp(-10, 10).exp()
         elif activation == "softplus":
