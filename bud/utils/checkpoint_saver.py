@@ -31,12 +31,14 @@ class CheckpointSaver:
         decreasing=False,
         max_history=10,
         unwrap_fn=unwrap_model,
+        best_save_start_epoch=0,
     ):
         # objects to save state_dicts of
         self.model = model
         self.optimizer = optimizer
         self.args = args
         self.amp_scaler = amp_scaler
+        self.best_save_start_epoch = best_save_start_epoch
 
         # state
         self.checkpoint_files = (
@@ -93,8 +95,10 @@ class CheckpointSaver:
                 checkpoints_str += " {}\n".format(c)
             logger.info(checkpoints_str)
 
-            if metric is not None and (
-                self.best_metric is None or self.cmp(metric, self.best_metric)
+            if (
+                metric is not None
+                and epoch >= self.best_save_start_epoch
+                and (self.best_metric is None or self.cmp(metric, self.best_metric))
             ):
                 self.best_epoch = epoch
                 self.best_metric = metric

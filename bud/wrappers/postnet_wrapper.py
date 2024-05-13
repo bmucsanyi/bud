@@ -3,7 +3,12 @@ from pyro.distributions.transforms.radial import Radial
 from torch import nn
 from torch.distributions import MultivariateNormal
 from bud.wrappers.model_wrapper import DirichletWrapper
-from bud.utils import entropy
+import math
+from pyro.distributions.util import copy_docs_from
+from pyro.distributions.torch_transform import TransformModule
+from torch.distributions import Transform, constraints
+import torch.distributions as tdist
+import torch.nn.functional as F
 
 
 class NormalizingFlowDensity(nn.Module):
@@ -31,17 +36,6 @@ class NormalizingFlowDensity(nn.Module):
         log_prob_x = log_prob_z + sum_log_jacobians
 
         return log_prob_x
-
-
-import math
-
-from pyro.distributions.util import copy_docs_from
-from pyro.distributions.torch_transform import TransformModule
-from torch.distributions import Transform, constraints
-import torch.distributions as tdist
-import torch.nn.functional as F
-from torch import nn
-import torch
 
 
 @copy_docs_from(Transform)
@@ -287,32 +281,9 @@ class PostNetWrapper(DirichletWrapper):
         if self.training:
             return alphas
 
-        sum_alphas = alphas.sum(dim=1)  # [B]
-
-        num_classes = alphas.shape[1]
-        dirichlet_scaled_inverse_precision = num_classes / sum_alphas  # [B]
-
-        mean_alphas = alphas.div(sum_alphas.unsqueeze(1))  # [B, C]
-        digamma_term = torch.digamma(alphas + 1) - torch.digamma(
-            sum_alphas + 1
-        ).unsqueeze(
-            1
-        )  # [B, C]
-        dirichlet_expected_entropy = -mean_alphas.mul(digamma_term).sum(dim=1)  # [B]
-
-        dirichlet_entropy_of_expectation = entropy(mean_alphas)  # [B]
-
-        dirichlet_mutual_information = (
-            dirichlet_entropy_of_expectation - dirichlet_expected_entropy
-        )
-
         return {
-            "mean_alpha": mean_alphas,  # [B, C]
+            "alpha": alphas,  # [B, C]
             "feature": features,  # [B, D]
-            "dirichlet_scaled_inverse_precision": dirichlet_scaled_inverse_precision,  # [B]
-            "dirichlet_expected_entropy": dirichlet_expected_entropy,  # [B]
-            "dirichlet_entropy_of_expectation": dirichlet_entropy_of_expectation,  # [B]
-            "dirichlet_mutual_information": dirichlet_mutual_information,  # [B]
         }
 
     def get_classifier(self):

@@ -1602,34 +1602,10 @@ def get_bundle(
             risk_values = torch.empty(num_samples)
             estimates["risk_values"] = risk_values
         elif isinstance(model, DirichletWrapper):
-            time_dirichlet_scaled_inverse_precision_m = AverageMeter()
-            times[
-                "time_dirichlet_scaled_inverse_precision_m"
-            ] = time_dirichlet_scaled_inverse_precision_m
-            time_dirichlet_expected_entropy_m = AverageMeter()
-            times[
-                "time_dirichlet_expected_entropy_m"
-            ] = time_dirichlet_expected_entropy_m
-            time_dirichlet_entropy_of_expectation_m = AverageMeter()
-            times[
-                "time_dirichlet_entropy_of_expectation_m"
-            ] = time_dirichlet_entropy_of_expectation_m
-            time_dirichlet_mutual_information_m = AverageMeter()
-            times[
-                "time_dirichlet_mutual_information_m"
-            ] = time_dirichlet_mutual_information_m
-            dirichlet_scaled_inverse_precisions = torch.empty(num_samples)
-            estimates[
-                "dirichlet_scaled_inverse_precisions"
-            ] = dirichlet_scaled_inverse_precisions
-            dirichlet_expected_entropies = torch.empty(num_samples)
-            estimates["dirichlet_expected_entropies"] = dirichlet_expected_entropies
-            dirichlet_entropy_of_expectations = torch.empty(num_samples)
-            estimates[
-                "dirichlet_entropy_of_expectations"
-            ] = dirichlet_entropy_of_expectations
-            dirichlet_mutual_informations = torch.empty(num_samples)
-            estimates["dirichlet_mutual_informations"] = dirichlet_mutual_informations
+            time_scaled_inverse_precision_m = AverageMeter()
+            times["time_scaled_inverse_precision_m"] = time_scaled_inverse_precision_m
+            scaled_inverse_precisions = torch.empty(num_samples)
+            estimates["scaled_inverse_precisions"] = scaled_inverse_precisions
         elif isinstance(model, DDUWrapper):
             time_gmm_neg_log_density_m = AverageMeter()
             times["time_gmm_neg_log_density_m"] = time_gmm_neg_log_density_m
@@ -1692,7 +1668,9 @@ def get_bundle(
             for key in list(inference_dict.keys()):
                 inference_dict[key] = inference_dict[key].detach().cpu().float()
 
-            inference_dict = convert_inference_dict(model, inference_dict, base_time)
+            inference_dict = convert_inference_dict(
+                model, inference_dict, base_time, args
+            )
 
             features[indices] = inference_dict["feature"]
 
@@ -1746,14 +1724,8 @@ def get_bundle(
                     inference_dict=inference_dict,
                     indices=indices,
                     batch_size=batch_size,
-                    time_dirichlet_scaled_inverse_precision_m=time_dirichlet_scaled_inverse_precision_m,
-                    time_dirichlet_expected_entropy_m=time_dirichlet_expected_entropy_m,
-                    time_dirichlet_entropy_of_expectation_m=time_dirichlet_entropy_of_expectation_m,
-                    time_dirichlet_mutual_information_m=time_dirichlet_mutual_information_m,
-                    dirichlet_scaled_inverse_precisions=dirichlet_scaled_inverse_precisions,
-                    dirichlet_expected_entropies=dirichlet_expected_entropies,
-                    dirichlet_entropy_of_expectations=dirichlet_entropy_of_expectations,
-                    dirichlet_mutual_informations=dirichlet_mutual_informations,
+                    time_scaled_inverse_precision_m=time_scaled_inverse_precision_m,
+                    scaled_inverse_precisions=scaled_inverse_precisions,
                 )
             elif isinstance(model, DDUWrapper):
                 update_ddu(
@@ -2069,7 +2041,7 @@ def get_bundle(
     return estimates, log_probs, targets, times
 
 
-def convert_inference_dict(model, inference_dict, base_time):
+def convert_inference_dict(model, inference_dict, base_time, args):
     converted_inference_dict = {}
 
     features = inference_dict["feature"]
@@ -2081,125 +2053,274 @@ def convert_inference_dict(model, inference_dict, base_time):
         min_real = torch.finfo(features.dtype).min
 
         if isinstance(model, DirichletWrapper):
-            mean_alphas = inference_dict["mean_alpha"]
-            log_probs = mean_alphas.log().clamp(min=min_real).unsqueeze(1)  # [B, 1, C]
+            alphas = inference_dict["alpha"]  # [B, C]
+            log_probs = (
+                torch.distributions.Dirichlet(alphas)
+                .sample((args.num_mc_samples,))
+                .permute(1, 0, 2)
+                .log()
+                .clamp(min=min_real)
+            )  # [B, S, C]
+
+            time_log_probs_end = time.perf_counter()
+            time_log_probs = time_log_probs_end - time_log_probs_start + base_time
+
+            time_sum_alphas_start = time.perf_counter()
+            sum_alphas = alphas.sum(dim=1)  # [B]
+            time_sum_alphas_end = time.perf_counter()
+            time_sum_alphas = time_sum_alphas_end - time_sum_alphas_start + base_time
+
+            time_mean_alphas_start = time.perf_counter()
+            mean_alphas = alphas.div(sum_alphas.unsqueeze(1))  # [B, C]
+            time_mean_alphas_end = time.perf_counter()
+            time_mean_alphas = (
+                time_mean_alphas_end - time_mean_alphas_start + time_sum_alphas
+            )
+
+            log_bma = mean_alphas.log().clamp(min=min_real)
+            converted_inference_dict["log_bma"] = log_bma
+
+            time_log_fbar_start = time.perf_counter()
+            log_fbar = F.log_softmax(log_probs.mean(dim=1), dim=-1)  # [B, C]
+            time_log_fbar_end = time.perf_counter()
+            time_log_fbar = time_log_fbar_end - time_log_fbar_start + time_log_probs
+            converted_inference_dict["log_fbar"] = log_fbar
+
+            time_expected_entropy_start = time.perf_counter()
+            digamma_term = torch.digamma(alphas + 1) - torch.digamma(
+                sum_alphas + 1
+            ).unsqueeze(
+                1
+            )  # [B, C]
+            expected_entropy = -mean_alphas.mul(digamma_term).sum(dim=1)  # [B]
+            time_expected_entropy_end = time.perf_counter()
+            time_expected_entropy = (
+                time_expected_entropy_end
+                - time_expected_entropy_start
+                + time_mean_alphas
+            )
+            converted_inference_dict["expected_entropy"] = expected_entropy
+            converted_inference_dict["time_expected_entropy"] = time_expected_entropy
+
+            time_expected_divergence_start = time.perf_counter()
+            expected_divergence = kl_divergence(
+                log_fbar, log_probs.permute(1, 0, 2)
+            ).mean(dim=0)
+            time_expected_divergence_end = time.perf_counter()
+            time_expected_divergence = (
+                time_expected_divergence_end
+                - time_expected_divergence_start
+                + time_log_fbar
+            )
+            converted_inference_dict["expected_divergence"] = expected_divergence
+            converted_inference_dict[
+                "time_expected_divergence"
+            ] = time_expected_divergence
+
+            time_probs_start = time.perf_counter()
+            probs = log_probs.exp()
+            time_probs_end = time.perf_counter()
+            time_probs = time_probs_end - time_probs_start
+
+            time_expected_max_prob_start = time.perf_counter()
+            expected_max_prob = probs.max(dim=-1)[0].mean(dim=1)
+            time_expected_max_prob_end = time.perf_counter()
+            time_expected_max_prob = (
+                time_expected_max_prob_end - time_expected_max_prob_start + time_probs
+            )
+            converted_inference_dict["expected_max_prob"] = expected_max_prob
+            converted_inference_dict["time_expected_max_prob"] = time_expected_max_prob
+
+            time_entropy_of_bma_start = time.perf_counter()
+            entropy_of_bma = entropy(mean_alphas)
+            time_entropy_of_bma_end = time.perf_counter()
+            time_entropy_of_bma = (
+                time_entropy_of_bma_end - time_entropy_of_bma_start + time_mean_alphas
+            )
+            converted_inference_dict["entropy_of_bma"] = entropy_of_bma
+            converted_inference_dict["time_entropy_of_bma"] = time_entropy_of_bma
+
+            time_fbar_start = time.perf_counter()
+            fbar = log_fbar.exp()
+            time_fbar_end = time.perf_counter()
+            time_fbar = time_fbar_end - time_fbar_start
+
+            time_entropy_of_fbar_start = time.perf_counter()
+            entropy_of_fbar = entropy(fbar)
+            time_entropy_of_fbar_end = time.perf_counter()
+            time_entropy_of_fbar = (
+                time_entropy_of_fbar_end - time_entropy_of_fbar_start + time_fbar
+            )
+            converted_inference_dict["entropy_of_fbar"] = entropy_of_fbar
+            converted_inference_dict["time_entropy_of_fbar"] = time_entropy_of_fbar
+
+            time_max_prob_of_bma_start = time.perf_counter()
+            max_prob_of_bma = mean_alphas.max(dim=-1)[0]
+            time_max_prob_of_bma_end = time.perf_counter()
+            time_max_prob_of_bma = (
+                time_max_prob_of_bma_end - time_max_prob_of_bma_start + time_mean_alphas
+            )
+            converted_inference_dict["max_prob_of_bma"] = max_prob_of_bma
+            converted_inference_dict["time_max_prob_of_bma"] = time_max_prob_of_bma
+
+            time_max_prob_of_fbar_start = time.perf_counter()
+            max_prob_of_fbar = fbar.max(dim=-1)[0]
+            time_max_prob_of_fbar_end = time.perf_counter()
+            time_max_prob_of_fbar = (
+                time_max_prob_of_fbar_end - time_max_prob_of_fbar_start + time_fbar
+            )
+            converted_inference_dict["max_prob_of_fbar"] = max_prob_of_fbar
+            converted_inference_dict["time_max_prob_of_fbar"] = time_max_prob_of_fbar
+
+            time_jsd_start = time.perf_counter()
+            jensen_shannon_divergence = entropy_of_bma - expected_entropy
+            time_jsd_end = time.perf_counter()
+            time_jsd = (
+                time_jsd_end
+                - time_jsd_start
+                + time_entropy_of_bma
+                + time_expected_entropy
+                - time_probs
+            )
+            converted_inference_dict[
+                "jensen_shannon_divergence"
+            ] = jensen_shannon_divergence
+            converted_inference_dict["time_jsd"] = time_jsd
+
+            time_scaled_inverse_precision_start = time.perf_counter()
+            num_classes = alphas.shape[1]
+            scaled_inverse_precision = num_classes / sum_alphas  # [B]
+            time_scaled_inverse_precision_end = time.perf_counter()
+            time_scaled_inverse_precision = (
+                time_scaled_inverse_precision_end
+                - time_scaled_inverse_precision_start
+                + time_sum_alphas
+            )
+            converted_inference_dict[
+                "scaled_inverse_precision"
+            ] = scaled_inverse_precision
+            converted_inference_dict[
+                "time_scaled_inverse_precision"
+            ] = time_scaled_inverse_precision
         else:
             logits = inference_dict["logit"]
             if logits.dim() == 2:  # [B, C]
                 logits = logits.unsqueeze(dim=1)  # [B, 1, C]
             log_probs = F.log_softmax(logits, dim=-1)  # [B, S, C]
 
-        time_log_probs_end = time.perf_counter()
-        time_log_probs = time_log_probs_end - time_log_probs_start + base_time
+            time_log_probs_end = time.perf_counter()
+            time_log_probs = time_log_probs_end - time_log_probs_start + base_time
 
-        time_probs_start = time.perf_counter()
-        probs = log_probs.exp()  # [B, S, C]
-        time_probs_end = time.perf_counter()
-        time_probs = time_probs_end - time_probs_start + time_log_probs
+            time_probs_start = time.perf_counter()
+            probs = log_probs.exp()  # [B, S, C]
+            time_probs_end = time.perf_counter()
+            time_probs = time_probs_end - time_probs_start + time_log_probs
 
-        time_log_fbar_start = time.perf_counter()
+            time_log_fbar_start = time.perf_counter()
 
-        log_fbar = F.log_softmax(log_probs.mean(dim=1), dim=-1)  # [B, C]
+            log_fbar = F.log_softmax(log_probs.mean(dim=1), dim=-1)  # [B, C]
 
-        time_log_fbar_end = time.perf_counter()
-        time_log_fbar = time_log_fbar_end - time_log_fbar_start + time_log_probs
+            time_log_fbar_end = time.perf_counter()
+            time_log_fbar = time_log_fbar_end - time_log_fbar_start + time_log_probs
 
-        time_fbar_start = time.perf_counter()
-        fbar = log_fbar.exp()
-        time_fbar_end = time.perf_counter()
-        time_fbar = time_fbar_end - time_fbar_start + time_log_fbar
-        converted_inference_dict["log_fbar"] = log_fbar
+            time_fbar_start = time.perf_counter()
+            fbar = log_fbar.exp()
+            time_fbar_end = time.perf_counter()
+            time_fbar = time_fbar_end - time_fbar_start + time_log_fbar
+            converted_inference_dict["log_fbar"] = log_fbar
 
-        time_bma_start = time.perf_counter()
-        bma = probs.mean(dim=1)  # [B, C]
-        time_bma_end = time.perf_counter()
-        time_bma = time_bma_end - time_bma_start + time_probs
+            time_bma_start = time.perf_counter()
+            bma = probs.mean(dim=1)  # [B, C]
+            time_bma_end = time.perf_counter()
+            time_bma = time_bma_end - time_bma_start + time_probs
 
-        log_bma = bma.log()  # [B, C]
-        log_bma = torch.clamp(log_bma, min=min_real)
-        converted_inference_dict["log_bma"] = log_bma
+            log_bma = bma.log()  # [B, C]
+            log_bma = torch.clamp(log_bma, min=min_real)
+            converted_inference_dict["log_bma"] = log_bma
 
-        time_expected_entropy_start = time.perf_counter()
-        expected_entropy = entropy(probs).mean(dim=-1)
-        time_expected_entropy_end = time.perf_counter()
-        time_expected_entropy = (
-            time_expected_entropy_end - time_expected_entropy_start + time_probs
-        )
-        converted_inference_dict["expected_entropy"] = expected_entropy
-        converted_inference_dict["time_expected_entropy"] = time_expected_entropy
+            time_expected_entropy_start = time.perf_counter()
+            expected_entropy = entropy(probs).mean(dim=-1)
+            time_expected_entropy_end = time.perf_counter()
+            time_expected_entropy = (
+                time_expected_entropy_end - time_expected_entropy_start + time_probs
+            )
+            converted_inference_dict["expected_entropy"] = expected_entropy
+            converted_inference_dict["time_expected_entropy"] = time_expected_entropy
 
-        time_expected_divergence_start = time.perf_counter()
-        expected_divergence = kl_divergence(log_fbar, log_probs.permute(1, 0, 2)).mean(
-            dim=0
-        )
-        time_expected_divergence_end = time.perf_counter()
-        time_expected_divergence = (
-            time_expected_divergence_end
-            - time_expected_divergence_start
-            + time_log_fbar
-        )
-        converted_inference_dict["expected_divergence"] = expected_divergence
-        converted_inference_dict["time_expected_divergence"] = time_expected_divergence
+            time_expected_divergence_start = time.perf_counter()
+            expected_divergence = kl_divergence(
+                log_fbar, log_probs.permute(1, 0, 2)
+            ).mean(dim=0)
+            time_expected_divergence_end = time.perf_counter()
+            time_expected_divergence = (
+                time_expected_divergence_end
+                - time_expected_divergence_start
+                + time_log_fbar
+            )
+            converted_inference_dict["expected_divergence"] = expected_divergence
+            converted_inference_dict[
+                "time_expected_divergence"
+            ] = time_expected_divergence
 
-        time_expected_max_prob_start = time.perf_counter()
-        expected_max_prob = probs.max(dim=-1)[0].mean(dim=1)
-        time_expected_max_prob_end = time.perf_counter()
-        time_expected_max_prob = (
-            time_expected_max_prob_end - time_expected_max_prob_start + time_probs
-        )
-        converted_inference_dict["expected_max_prob"] = expected_max_prob
-        converted_inference_dict["time_expected_max_prob"] = time_expected_max_prob
+            time_expected_max_prob_start = time.perf_counter()
+            expected_max_prob = probs.max(dim=-1)[0].mean(dim=1)
+            time_expected_max_prob_end = time.perf_counter()
+            time_expected_max_prob = (
+                time_expected_max_prob_end - time_expected_max_prob_start + time_probs
+            )
+            converted_inference_dict["expected_max_prob"] = expected_max_prob
+            converted_inference_dict["time_expected_max_prob"] = time_expected_max_prob
 
-        time_entropy_of_bma_start = time.perf_counter()
-        entropy_of_bma = entropy(bma)
-        time_entropy_of_bma_end = time.perf_counter()
-        time_entropy_of_bma = (
-            time_entropy_of_bma_end - time_entropy_of_bma_start + time_bma
-        )
-        converted_inference_dict["entropy_of_bma"] = entropy_of_bma
-        converted_inference_dict["time_entropy_of_bma"] = time_entropy_of_bma
+            time_entropy_of_bma_start = time.perf_counter()
+            entropy_of_bma = entropy(bma)
+            time_entropy_of_bma_end = time.perf_counter()
+            time_entropy_of_bma = (
+                time_entropy_of_bma_end - time_entropy_of_bma_start + time_bma
+            )
+            converted_inference_dict["entropy_of_bma"] = entropy_of_bma
+            converted_inference_dict["time_entropy_of_bma"] = time_entropy_of_bma
 
-        time_entropy_of_fbar_start = time.perf_counter()
-        entropy_of_fbar = entropy(fbar)
-        time_entropy_of_fbar_end = time.perf_counter()
-        time_entropy_of_fbar = (
-            time_entropy_of_fbar_end - time_entropy_of_fbar_start + time_fbar
-        )
-        converted_inference_dict["entropy_of_fbar"] = entropy_of_fbar
-        converted_inference_dict["time_entropy_of_fbar"] = time_entropy_of_fbar
+            time_entropy_of_fbar_start = time.perf_counter()
+            entropy_of_fbar = entropy(fbar)
+            time_entropy_of_fbar_end = time.perf_counter()
+            time_entropy_of_fbar = (
+                time_entropy_of_fbar_end - time_entropy_of_fbar_start + time_fbar
+            )
+            converted_inference_dict["entropy_of_fbar"] = entropy_of_fbar
+            converted_inference_dict["time_entropy_of_fbar"] = time_entropy_of_fbar
 
-        time_max_prob_of_bma_start = time.perf_counter()
-        max_prob_of_bma = bma.max(dim=-1)[0]
-        time_max_prob_of_bma_end = time.perf_counter()
-        time_max_prob_of_bma = (
-            time_max_prob_of_bma_end - time_max_prob_of_bma_start + time_bma
-        )
-        converted_inference_dict["max_prob_of_bma"] = max_prob_of_bma
-        converted_inference_dict["time_max_prob_of_bma"] = time_max_prob_of_bma
+            time_max_prob_of_bma_start = time.perf_counter()
+            max_prob_of_bma = bma.max(dim=-1)[0]
+            time_max_prob_of_bma_end = time.perf_counter()
+            time_max_prob_of_bma = (
+                time_max_prob_of_bma_end - time_max_prob_of_bma_start + time_bma
+            )
+            converted_inference_dict["max_prob_of_bma"] = max_prob_of_bma
+            converted_inference_dict["time_max_prob_of_bma"] = time_max_prob_of_bma
 
-        time_max_prob_of_fbar_start = time.perf_counter()
-        max_prob_of_fbar = fbar.max(dim=-1)[0]
-        time_max_prob_of_fbar_end = time.perf_counter()
-        time_max_prob_of_fbar = (
-            time_max_prob_of_fbar_end - time_max_prob_of_fbar_start + time_fbar
-        )
-        converted_inference_dict["max_prob_of_fbar"] = max_prob_of_fbar
-        converted_inference_dict["time_max_prob_of_fbar"] = time_max_prob_of_fbar
+            time_max_prob_of_fbar_start = time.perf_counter()
+            max_prob_of_fbar = fbar.max(dim=-1)[0]
+            time_max_prob_of_fbar_end = time.perf_counter()
+            time_max_prob_of_fbar = (
+                time_max_prob_of_fbar_end - time_max_prob_of_fbar_start + time_fbar
+            )
+            converted_inference_dict["max_prob_of_fbar"] = max_prob_of_fbar
+            converted_inference_dict["time_max_prob_of_fbar"] = time_max_prob_of_fbar
 
-        time_jsd_start = time.perf_counter()
-        jensen_shannon_divergence = entropy_of_bma - expected_entropy
-        time_jsd_end = time.perf_counter()
-        time_jsd = (
-            time_jsd_end
-            - time_jsd_start
-            + time_entropy_of_bma
-            + time_expected_entropy
-            - time_probs
-        )
-        converted_inference_dict[
-            "jensen_shannon_divergence"
-        ] = jensen_shannon_divergence
-        converted_inference_dict["time_jsd"] = time_jsd
+            time_jsd_start = time.perf_counter()
+            jensen_shannon_divergence = entropy_of_bma - expected_entropy
+            time_jsd_end = time.perf_counter()
+            time_jsd = (
+                time_jsd_end
+                - time_jsd_start
+                + time_entropy_of_bma
+                + time_expected_entropy
+                - time_probs
+            )
+            converted_inference_dict[
+                "jensen_shannon_divergence"
+            ] = jensen_shannon_divergence
+            converted_inference_dict["time_jsd"] = time_jsd
 
         if isinstance(model, NonIsotropicvMFWrapper):
             converted_inference_dict["nivmf_inverse_kappa"] = inference_dict[
@@ -2209,27 +2330,6 @@ def convert_inference_dict(model, inference_dict, base_time):
         elif isinstance(model, BaseLossPredictionWrapper):
             converted_inference_dict["risk_value"] = inference_dict["risk_value"]
             converted_inference_dict["time_risk_value"] = base_time
-        elif isinstance(model, DirichletWrapper):
-            converted_inference_dict[
-                "dirichlet_scaled_inverse_precision"
-            ] = inference_dict["dirichlet_scaled_inverse_precision"]
-            converted_inference_dict["dirichlet_expected_entropy"] = inference_dict[
-                "dirichlet_expected_entropy"
-            ]
-            converted_inference_dict[
-                "dirichlet_entropy_of_expectation"
-            ] = inference_dict["dirichlet_entropy_of_expectation"]
-            converted_inference_dict["dirichlet_mutual_information"] = inference_dict[
-                "dirichlet_mutual_information"
-            ]
-            converted_inference_dict[
-                "time_dirichlet_scaled_inverse_precision"
-            ] = base_time
-            converted_inference_dict["time_dirichlet_expected_entropy"] = base_time
-            converted_inference_dict[
-                "time_dirichlet_entropy_of_expectation"
-            ] = base_time
-            converted_inference_dict["time_dirichlet_mutual_information"] = base_time
         elif isinstance(model, DDUWrapper):
             converted_inference_dict["gmm_neg_log_density"] = inference_dict[
                 "gmm_neg_log_density"
@@ -2334,37 +2434,13 @@ def update_dirichlet(
     inference_dict,
     indices,
     batch_size,
-    time_dirichlet_scaled_inverse_precision_m,
-    time_dirichlet_expected_entropy_m,
-    time_dirichlet_entropy_of_expectation_m,
-    time_dirichlet_mutual_information_m,
-    dirichlet_scaled_inverse_precisions,
-    dirichlet_expected_entropies,
-    dirichlet_entropy_of_expectations,
-    dirichlet_mutual_informations,
+    time_scaled_inverse_precision_m,
+    scaled_inverse_precisions,
 ):
-    time_dirichlet_scaled_inverse_precision_m.update(
-        inference_dict["time_dirichlet_scaled_inverse_precision"], batch_size
+    time_scaled_inverse_precision_m.update(
+        inference_dict["time_scaled_inverse_precision"], batch_size
     )
-    time_dirichlet_expected_entropy_m.update(
-        inference_dict["time_dirichlet_expected_entropy"], batch_size
-    )
-    time_dirichlet_entropy_of_expectation_m.update(
-        inference_dict["time_dirichlet_entropy_of_expectation"], batch_size
-    )
-    time_dirichlet_mutual_information_m.update(
-        inference_dict["time_dirichlet_mutual_information"], batch_size
-    )
-    dirichlet_scaled_inverse_precisions[indices] = inference_dict[
-        "dirichlet_scaled_inverse_precision"
-    ]
-    dirichlet_expected_entropies[indices] = inference_dict["dirichlet_expected_entropy"]
-    dirichlet_entropy_of_expectations[indices] = inference_dict[
-        "dirichlet_entropy_of_expectation"
-    ]
-    dirichlet_mutual_informations[indices] = inference_dict[
-        "dirichlet_mutual_information"
-    ]
+    scaled_inverse_precisions[indices] = inference_dict["scaled_inverse_precision"]
 
 
 def update_ddu(

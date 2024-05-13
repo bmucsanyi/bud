@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-""" ImageNet, CIFAR Training Script
+"""ImageNet, CIFAR Training Script
 
 This is intended to be a lean and easily modifiable ImageNet and CIFAR training script
 that reproduces ImageNet and CIFAR training results with some of the latest networks and
@@ -16,6 +16,7 @@ NVIDIA CUDA specific speedups adopted from NVIDIA Apex examples
 Hacked together by / Copyright 2020 Ross Wightman (https://github.com/rwightman)
                            and 2024 Bálint Mucsányi (https://github.com/bmucsanyi)
 """
+
 import argparse
 import logging
 import os
@@ -385,7 +386,7 @@ group.add_argument(
     "--num-mc-samples",
     default=10,
     type=int,
-    help="number of Monte Carlo samples in the uncertainty method (default: False)",
+    help="number of Monte Carlo samples in the uncertainty method (default: 10)",
 )
 group.add_argument(
     "--rbf-length-scale",
@@ -399,7 +400,7 @@ group.add_argument(
     type=float,
     help=(
         "momentum factor for the exponential moving average in the DUQ method "
-        "(default: 0.1)"
+        "(default: 0.999)"
     ),
 )
 group.add_argument(
@@ -1460,6 +1461,15 @@ group.add_argument(
     default=False,
     help="whether eval-metric is decreasing (default: False)",
 )
+group.add_argument(
+    "--best-save-start-epoch",
+    type=int,
+    default=0,
+    help=(
+        "epoch index from which best model according to eval metric is saved "
+        "(default: 0)"
+    ),
+)
 group.add_argument("--local-rank", default=0, type=int)
 group.add_argument(
     "--use-multi-epochs-loader",
@@ -2177,7 +2187,7 @@ def main():
     # Setup checkpoint saver and eval metric tracking
     eval_metric = args.eval_metric
     best_metric = None
-    best_eval_metric = 0
+    best_eval_metric = float("inf") if args.decreasing else -float("inf")
     best_eval_metrics = None
     best_test_metrics = None
     best_epoch = None
@@ -2198,6 +2208,9 @@ def main():
         output_dir = utils.get_outdir(
             args.output if args.output else "./output/train", exp_name
         )
+
+        logger.info(f"Output directory is {output_dir}")
+
         decreasing = args.decreasing
         saver = utils.CheckpointSaver(
             model=model,
@@ -2208,6 +2221,7 @@ def main():
             recovery_dir=output_dir,
             decreasing=decreasing,
             max_history=args.checkpoint_hist,
+            best_save_start_epoch=args.best_save_start_epoch,
         )
         with open(os.path.join(output_dir, "args.yaml"), "w") as f:
             f.write(args_text)
@@ -2308,10 +2322,15 @@ def main():
 
             logger.info(f"{eval_metric}: {eval_metrics[eval_metric]}")
 
-            is_new_best = (
-                epoch == start_epoch
-                or (decreasing and eval_metrics[eval_metric] < best_eval_metric)
-                or ((not decreasing) and eval_metrics[eval_metric] > best_eval_metric)
+            is_new_best = (args.lr == 0 and epoch == 0) or (
+                epoch >= args.best_save_start_epoch
+                and (
+                    (decreasing and eval_metrics[eval_metric] < best_eval_metric)
+                    or (
+                        (not decreasing)
+                        and eval_metrics[eval_metric] > best_eval_metric
+                    )
+                )
             )
 
             if is_new_best:

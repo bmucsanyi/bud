@@ -100,5 +100,5 @@ class SpecialWrapper(ModelWrapper):
     pass
 
 
-class DirichletWrapper(SpecialWrapper):
+class DirichletWrapper(PosteriorWrapper):
     pass

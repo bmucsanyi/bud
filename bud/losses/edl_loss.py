@@ -4,7 +4,9 @@ import torch.nn.functional as F
 
 
 class EDLLoss(nn.Module):
-    def __init__(self, num_batches: int, num_classes: int, start_epoch: int, scaler: float) -> None:
+    def __init__(
+        self, num_batches: int, num_classes: int, start_epoch: int, scaler: float
+    ) -> None:
         super().__init__()
 
         self.curr_batch = 1
