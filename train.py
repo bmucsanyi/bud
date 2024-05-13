@@ -2190,7 +2190,7 @@ def main():
         else:
             exp_name = "-".join(
                 [
-                    datetime.now().strftime("%Y%m%d-%H%M%S"),
+                    datetime.now().strftime("%Y%m%d-%H%M%S-%f"),
                     safe_model_name(args.model),
                     str(data_config["input_size"][-1]),
                 ]
