@@ -1,5 +1,6 @@
 from laplace import Laplace
 from torch import nn
+import torch
 
 from bud.utils.replace import replace
 from bud.wrappers.model_wrapper import PosteriorWrapper
@@ -80,14 +81,16 @@ class LaplaceWrapper(PosteriorWrapper):
         if self.training:
             return self.model(inputs)
         else:
+            feature = self.model.forward_head(
+                self.model.forward_features(inputs), pre_logits=True
+            )
+
             return {
                 "logit": self.laplace_model.predictive_samples(
                     x=inputs, pred_type=self.pred_type, n_samples=self.num_mc_samples
                 )
-                .clamp(min=1e-10)
                 .log()
+                .clamp(min=torch.finfo(feature.dtype).min)
                 .permute(1, 0, 2),  # [B, S, C]
-                "feature": self.model.forward_head(
-                    self.model.forward_features(inputs), pre_logits=True
-                ),
+                "feature": feature,
             }
