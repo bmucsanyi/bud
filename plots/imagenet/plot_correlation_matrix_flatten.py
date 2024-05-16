@@ -33,7 +33,7 @@ def main():
     api = wandb.Api()
 
     create_directory("results")
-    create_directory(f"results/correlation_matrix")
+    create_directory("results/correlation_matrix")
 
     metric_dict = {
         "auroc_hard_bma_correctness": "Correctness AUROC",
@@ -147,7 +147,8 @@ def main():
     cbar.outline.set_visible(False)
     cbar.ax.tick_params(width=0.1)
     cbar.set_ticks([-0.983, 0, 1.01])
-    cbar.set_ticklabels(["-1 (Neg. Corr.)", "0 (No Corr.)", "1 (Pos. Corr.)"])
+    # cbar.set_ticklabels(["-1 (Neg. Corr.)", "0 (No Corr.)", "1 (Pos. Corr.)"])
+    cbar.set_ticklabels(["-1", "0", "1"])
 
     # Set ticks
     ax.set_xticks(np.arange(len(metric_dict)))
@@ -159,6 +160,7 @@ def main():
 
     # Rotate the tick labels and set their alignment
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+    plt.setp(ax.get_yticklabels(), rotation=45, ha="right", rotation_mode="anchor")
 
     # Loop over data dimensions and create text annotations for only the lower triangle
     for i in range(len(metric_dict)):

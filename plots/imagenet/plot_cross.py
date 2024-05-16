@@ -212,7 +212,7 @@ def main():
         )
 
         plt.xlabel("Severity Level")
-        plt.ylabel(rf"Metric Values $\uparrow$")
+        plt.ylabel(r"Metric Values $\uparrow$")
         plt.ylim(0, 1)
 
         handles, labels = plt.gca().get_legend_handles_labels()
