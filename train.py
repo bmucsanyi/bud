@@ -2221,7 +2221,6 @@ def main():
             recovery_dir=output_dir,
             decreasing=decreasing,
             max_history=args.checkpoint_hist,
-            best_save_start_epoch=args.best_save_start_epoch,
         )
         with open(os.path.join(output_dir, "args.yaml"), "w") as f:
             f.write(args_text)
@@ -2409,7 +2408,11 @@ def main():
                     log_wandb=args.log_wandb and has_wandb,
                 )
 
-            if saver is not None and epoch < num_epochs:
+            if (
+                saver is not None
+                and epoch < num_epochs
+                and epoch >= args.best_save_start_epoch
+            ):
                 # Save proper checkpoint with eval metric
                 save_metric = eval_metrics[eval_metric]
                 best_metric, best_epoch = saver.save_checkpoint(

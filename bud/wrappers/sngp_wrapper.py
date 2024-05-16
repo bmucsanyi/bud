@@ -525,9 +525,7 @@ class Conv2dSpectralNormalizer(nn.Module):
         self.register_buffer("_u", nn.UninitializedBuffer())
         self.register_buffer("_v", nn.UninitializedBuffer())
 
-        self._load_hook = self._register_load_state_dict_pre_hook(
-            self._lazy_load_hook
-        )
+        self._load_hook = self._register_load_state_dict_pre_hook(self._lazy_load_hook)
         self._module_input_shape_hook = module.register_forward_pre_hook(
             Conv2dSpectralNormalizer._module_set_input_shape, with_kwargs=True
         )
