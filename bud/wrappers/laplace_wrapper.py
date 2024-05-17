@@ -106,6 +106,7 @@ class LaplaceWrapper(PosteriorWrapper):
                 "feature": feature,
             }
 
+    @staticmethod
     def get_nll(out_dist, targets):
         return F.nll_loss(
             out_dist.log().clamp(min=torch.finfo(out_dist.dtype).min), targets
