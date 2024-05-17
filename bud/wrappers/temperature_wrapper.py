@@ -47,8 +47,8 @@ class TemperatureWrapper(SpecialWrapper):
             for input, label in val_loader:
                 input = input.to(device)
                 logits = self.model(input)
-                logits_list.append(logits)
-                labels_list.append(label)
+                logits_list.append(logits)  # TODO: .cpu() here
+                labels_list.append(label)  # TODO: .cpu() here
             logits = torch.cat(logits_list).cpu()
             labels = torch.cat(labels_list).cpu()
 
