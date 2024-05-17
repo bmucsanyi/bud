@@ -3,6 +3,7 @@ from torch import nn
 import torch
 import torch.nn.functional as F
 import numpy as np
+import time
 
 from bud.utils.replace import replace
 from bud.wrappers.model_wrapper import PosteriorWrapper
@@ -145,6 +146,7 @@ class LaplaceWrapper(PosteriorWrapper):
         prior_precs = list()
         for prior_prec in interval:
             print(f"Trying {prior_prec}...")
+            start_time = time.perf_counter()
             self.laplace_model.prior_precision = prior_prec
             try:
                 out_dist, targets = self.validate(
@@ -157,6 +159,7 @@ class LaplaceWrapper(PosteriorWrapper):
             except RuntimeError as error:
                 print(f"Caught an exception in validate: {error}")
                 result = float("inf")
+            print(f"Took {time.perf_counter() - start_time} seconds")
             results.append(result)
             prior_precs.append(prior_prec)
         return prior_precs[np.argmin(results)]
