@@ -1883,7 +1883,10 @@ def get_bundle(
             }
 
             inference_dict = convert_inference_dict(
-                model, inference_dict, avg_base_time
+                model,
+                inference_dict,
+                avg_base_time,
+                args,
             )
 
             update_logit_based(
