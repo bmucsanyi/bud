@@ -519,9 +519,6 @@ class Conv2dSpectralNormalizer(nn.Module):
         self.device = weight.device
         self.weight_shape = weight.shape
 
-        # Partial initialization; shape inference happens in first forward
-        self.input_shape = None
-
         self.register_buffer("_u", nn.UninitializedBuffer())
         self.register_buffer("_v", nn.UninitializedBuffer())
 
@@ -540,7 +537,54 @@ class Conv2dSpectralNormalizer(nn.Module):
 
         for parametrization in module.parametrizations.weight:
             if isinstance(parametrization, Conv2dSpectralNormalizer):
-                parametrization.input_shape = input.shape
+                input_channels, input_height, input_width = input.shape[1:]
+                parametrization.single_input_shape = (
+                    1,
+                    input_channels,
+                    input_height,
+                    input_width,
+                )
+
+                # Infer output shape with batch size = 1. We know this without having
+                # to run the Conv2d module, as we use "same" padding in our internal
+                # calculations
+                output_channels = parametrization.output_channels
+                output_height = input_height // parametrization.stride[0]
+                output_width = input_width // parametrization.stride[1]
+                parametrization.single_output_shape = (
+                    1,
+                    output_channels,
+                    output_height,
+                    output_width,
+                )
+
+                # Infer input padding
+                parametrization.left_right_top_bottom_padding = calculate_same_padding(
+                    parametrization.single_output_shape,
+                    parametrization.weight_shape,
+                    parametrization.stride,
+                    parametrization.dilation,
+                )
+                total_width_height_padding = (
+                    parametrization.left_right_top_bottom_padding[0]
+                    + parametrization.left_right_top_bottom_padding[1],
+                    parametrization.left_right_top_bottom_padding[2]
+                    + parametrization.left_right_top_bottom_padding[3],
+                )
+                parametrization.per_side_width_height_padding = (
+                    math.ceil(total_width_height_padding[0] / 2),
+                    math.ceil(total_width_height_padding[1] / 2),
+                )
+
+                # Infer output padding
+                parametrization.output_padding = calculate_output_padding(
+                    input_shape=parametrization.single_output_shape,
+                    output_shape=parametrization.single_input_shape,
+                    stride=parametrization.stride,
+                    padding=parametrization.per_side_width_height_padding,  # parametrization.padding,
+                    kernel_size=parametrization.kernel_size,
+                    dilation=parametrization.dilation,
+                )
 
                 break  # Invariant: there is only one Conv2dSpectralNormalizer registered
 
@@ -628,27 +672,7 @@ class Conv2dSpectralNormalizer(nn.Module):
     def _initialize_buffers(self, weight) -> None:
         if self._has_uninitialized_buffers():
             with torch.no_grad():
-                # Infer input shape with batch size = 1
-                # By now, the hook attached to the Conv2d module has computed the
-                # input_shape attribute of self. Note that directly having the Conv2d
-                # module as an attribute would lead to circular references and
-                # RecursionErrors
-                input_channels, input_height, input_width = self.input_shape[1:]
-                self.single_input_shape = (1, input_channels, input_height, input_width)
                 flattened_input_shape = math.prod(self.single_input_shape)
-
-                # Infer output shape with batch size = 1. We know this without having
-                # to run the Conv2d module, as we use "same" padding in our internal
-                # calculations
-                output_channels = self.output_channels
-                output_height = input_height // self.stride[0]
-                output_width = input_width // self.stride[1]
-                self.single_output_shape = (
-                    1,
-                    output_channels,
-                    output_height,
-                    output_width,
-                )
                 flattened_output_shape = math.prod(self.single_output_shape)
 
                 device = weight.device
@@ -660,34 +684,6 @@ class Conv2dSpectralNormalizer(nn.Module):
                 # Initialize buffers randomly
                 nn.init.normal_(self._u)
                 nn.init.normal_(self._v)
-
-                # Infer input padding
-                self.left_right_top_bottom_padding = calculate_same_padding(
-                    self.single_output_shape,
-                    self.weight_shape,
-                    self.stride,
-                    self.dilation,
-                )
-                total_width_height_padding = (
-                    self.left_right_top_bottom_padding[0]
-                    + self.left_right_top_bottom_padding[1],
-                    self.left_right_top_bottom_padding[2]
-                    + self.left_right_top_bottom_padding[3],
-                )
-                self.per_side_width_height_padding = (
-                    math.ceil(total_width_height_padding[0] / 2),
-                    math.ceil(total_width_height_padding[1] / 2),
-                )
-
-                # Infer output padding
-                self.output_padding = calculate_output_padding(
-                    input_shape=self.single_output_shape,
-                    output_shape=self.single_input_shape,
-                    stride=self.stride,
-                    padding=self.padding,
-                    kernel_size=self.kernel_size,
-                    dilation=self.dilation,
-                )
 
                 # Initialize buffers with correct values. We do 50 iterations to have
                 # a good approximation of the correct singular vectors and the value

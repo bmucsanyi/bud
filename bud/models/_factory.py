@@ -263,9 +263,6 @@ def create_model(
     )
 
     if checkpoint_path:
-        # TODO: temporary fix for spectral norm checkpoints
-        import torch
-        model(torch.rand(1, 3, 224, 224))
         load_checkpoint(model, checkpoint_path)
 
     return model
