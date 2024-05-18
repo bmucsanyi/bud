@@ -70,6 +70,7 @@ class LaplaceWrapper(PosteriorWrapper):
                 pred_type=self.pred_type,
                 val_loader=val_loader,
                 link_approx=self.link_approx,
+                n_samples=50,
             )
         else:
             self.laplace_model.optimize_prior_precision(
