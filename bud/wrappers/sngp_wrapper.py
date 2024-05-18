@@ -511,7 +511,6 @@ class Conv2dSpectralNormalizer(nn.Module):
         self.eps = eps
 
         self.stride = module.stride
-        self.padding = module.padding
         self.dilation = module.dilation
         self.groups = module.groups
         self.output_channels = module.out_channels
@@ -581,7 +580,7 @@ class Conv2dSpectralNormalizer(nn.Module):
                     input_shape=parametrization.single_output_shape,
                     output_shape=parametrization.single_input_shape,
                     stride=parametrization.stride,
-                    padding=parametrization.per_side_width_height_padding,  # parametrization.padding,
+                    padding=parametrization.per_side_width_height_padding,
                     kernel_size=parametrization.kernel_size,
                     dilation=parametrization.dilation,
                 )

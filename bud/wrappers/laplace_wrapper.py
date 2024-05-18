@@ -70,7 +70,7 @@ class LaplaceWrapper(PosteriorWrapper):
                 pred_type=self.pred_type,
                 val_loader=val_loader,
                 link_approx=self.link_approx,
-                n_samples=50,
+                n_samples=max(50, self.num_mc_samples),
             )
         else:
             self.laplace_model.optimize_prior_precision(
@@ -100,7 +100,7 @@ class LaplaceWrapper(PosteriorWrapper):
 
             return {
                 "logit": self.laplace_model.predictive_samples(
-                    x=inputs, pred_type=self.pred_type, n_samples=self.num_mc_samples
+                    x=inputs, pred_type=self.pred_type, n_samples=self.num_mc_samples  # TODO: try 100 samples
                 )
                 .log()
                 .clamp(min=torch.finfo(feature.dtype).min)
