@@ -121,7 +121,7 @@ class DDUWrapper(TemperatureWrapper):
                     features[:, None, :].cpu()
                 ).cuda()  # [B, C]
                 gmm_weighted_log_densities = (
-                    gmm_log_densities + self.classwise_probs.log()
+                    gmm_log_densities  # + self.classwise_probs.log()
                 )
                 gmm_log_density = gmm_weighted_log_densities.logsumexp(dim=1)
 
