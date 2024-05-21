@@ -20,7 +20,7 @@ import torch.nn.functional as F
 import torch.nn.parallel
 from scipy.stats import ConstantInputWarning, pearsonr, spearmanr
 from sklearn.metrics import auc
-from torchmetrics.functional.classification import binary_auroc as auroc
+from sklearn.metrics import roc_auc_score as auroc
 
 from bud.utils import (
     AverageMeter,
