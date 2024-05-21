@@ -202,6 +202,7 @@ def calibration_error(
 def area_under_lift_curve(
     uncertainties: Tensor, correctnesses: Tensor, reverse_sort: bool = False
 ) -> Tensor:
+    correctnesses = correctnesses.float()
     batch_size = correctnesses.shape[0]
 
     if reverse_sort:
@@ -212,7 +213,7 @@ def area_under_lift_curve(
         sorted_idx = torch.argsort(uncertainties)  # Most certain indices first
 
     sorted_correctnesses = correctnesses[sorted_idx]
-    lift = torch.zeros((batch_size,))
+    lift = torch.zeros((batch_size,), dtype=torch.float32)
     accuracy = correctnesses.mean()
     lift[0] = sorted_correctnesses[0] / accuracy
 
