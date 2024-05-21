@@ -206,9 +206,7 @@ def area_under_lift_curve(
     batch_size = correctnesses.shape[0]
 
     if reverse_sort:
-        sorted_idx = torch.flip(
-            torch.argsort(uncertainties), dim=0
-        )  # Most uncertain indices first
+        sorted_idx = torch.argsort(uncertainties, descending=True)  # Most uncertain indices first
     else:
         sorted_idx = torch.argsort(uncertainties)  # Most certain indices first
 
