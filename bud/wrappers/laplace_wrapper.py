@@ -100,7 +100,9 @@ class LaplaceWrapper(PosteriorWrapper):
 
             return {
                 "logit": self.laplace_model.predictive_samples(
-                    x=inputs, pred_type=self.pred_type, n_samples=self.num_mc_samples  # TODO: try 100 samples
+                    x=inputs,
+                    pred_type=self.pred_type,
+                    n_samples=self.num_mc_samples,  # TODO: try 100 samples
                 )
                 .log()
                 .clamp(min=torch.finfo(feature.dtype).min)

@@ -27,6 +27,8 @@ from .metrics import (
     multiclass_log_probability,
     pct_cropped_has_bigger_pu,
     recall_at_one,
+    dempster_shafer_metric,
+    relative_area_under_lift_curve,
 )
 from .misc import (
     ParseKwargs,

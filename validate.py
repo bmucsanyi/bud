@@ -32,6 +32,8 @@ from bud.utils import (
     multiclass_brier,
     multiclass_log_probability,
     recall_at_one,
+    dempster_shafer_metric,
+    relative_area_under_lift_curve,
 )
 from bud.wrappers import (
     BaseCorrectnessPredictionWrapper,
@@ -42,7 +44,6 @@ from bud.wrappers import (
     MahalanobisWrapper,
     MCInfoNCEWrapper,
     NonIsotropicvMFWrapper,
-    EDLWrapper,
     DirichletWrapper,
 )
 
@@ -648,6 +649,9 @@ def evaluate_on_abstained_prediction(
             increasing_fraction,
             gt_zero_shot_correctnesses[indices].cumsum(dim=0) / increasing_count,
         )
+        metrics[
+            f"{key_prefix}{estimator_name}_zero_shot_raulc"
+        ] = relative_area_under_lift_curve(estimate, gt_zero_shot_correctnesses).item()
 
         if is_same_task and not isinstance(model, MCInfoNCEWrapper):
             metrics[
@@ -676,6 +680,29 @@ def evaluate_on_abstained_prediction(
                 increasing_fraction,
                 gt_hard_bma_correctnesses_top5[indices].cumsum(dim=0)
                 / increasing_count,
+            )
+
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_fbar_raulc"
+            ] = relative_area_under_lift_curve(estimate, gt_hard_fbar_correctnesses)
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_bma_raulc"
+            ] = relative_area_under_lift_curve(
+                estimate,
+                gt_hard_bma_correctnesses,
+            )
+
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_fbar_raulc_top5"
+            ] = relative_area_under_lift_curve(
+                estimate,
+                gt_hard_fbar_correctnesses_top5,
+            )
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_bma_raulc_top5"
+            ] = relative_area_under_lift_curve(
+                estimate,
+                gt_hard_bma_correctnesses_top5,
             )
 
             if is_soft_labels:
@@ -708,25 +735,30 @@ def evaluate_on_abstained_prediction(
                     / increasing_count,
                 )
 
+                metrics[
+                    f"{key_prefix}{estimator_name}_soft_fbar_raulc"
+                ] = relative_area_under_lift_curve(estimate, gt_soft_fbar_correctnesses)
+                metrics[
+                    f"{key_prefix}{estimator_name}_soft_bma_raulc"
+                ] = relative_area_under_lift_curve(
+                    estimate,
+                    gt_soft_bma_correctnesses,
+                )
+
+                metrics[
+                    f"{key_prefix}{estimator_name}_soft_fbar_raulc_top5"
+                ] = relative_area_under_lift_curve(
+                    estimate,
+                    gt_soft_fbar_correctnesses_top5,
+                )
+                metrics[
+                    f"{key_prefix}{estimator_name}_soft_bma_raulc_top5"
+                ] = relative_area_under_lift_curve(
+                    estimate,
+                    gt_soft_bma_correctnesses_top5,
+                )
+
     return metrics
-
-
-# def predict_single_stage_reject_or_classify(log_probs, estimates, threshold):
-#     true_tensor = log_probs.argmax(dim=-1)
-#     false_tensor = log_probs.shape[-1] * torch.empty_like(true_tensor)
-#     return torch.where(estimates < threshold, true_tensor, false_tensor)
-
-
-# def predict_double_stage_reject_or_classify(
-#     log_probs, estimates_1, estimates_2, threshold_1, threshold_2
-# ):
-#     true_tensor = log_probs.argmax(dim=-1)
-#     false_tensor = log_probs.shape[-1] * torch.empty_like(true_tensor)
-#     return torch.where(
-#         (estimates_1 < threshold_1) & (estimates_2 < threshold_2),
-#         true_tensor,
-#         false_tensor,
-#     )
 
 
 def evaluate_on_ood_detection(estimates, targets, args):
@@ -1551,6 +1583,8 @@ def get_bundle(
         times["time_expected_divergence_m"] = time_expected_divergence_m
         time_jsd_m = AverageMeter()
         times["time_jsd_m"] = time_jsd_m
+        time_dempster_shafer_value_m = AverageMeter()
+        times["time_dempster_shafer_value_m"] = time_dempster_shafer_value_m
 
         log_fbars = torch.empty(num_samples, model.num_classes)
         log_probs["log_fbars"] = log_fbars
@@ -1581,6 +1615,8 @@ def get_bundle(
         ] = expected_entropies_plus_expected_divergences
 
         # EU
+        dempster_shafer_values = torch.empty(num_samples)
+        estimates["dempster_shafer_values"] = dempster_shafer_values
         # Just a duplicate
         estimates["expected_divergences"] = gt_epistemics_bregman
         jensen_shannon_divergences = torch.empty(num_samples)
@@ -1601,11 +1637,6 @@ def get_bundle(
             times["time_risk_value_m"] = time_risk_value_m
             risk_values = torch.empty(num_samples)
             estimates["risk_values"] = risk_values
-        elif isinstance(model, DirichletWrapper):
-            time_scaled_inverse_precision_m = AverageMeter()
-            times["time_scaled_inverse_precision_m"] = time_scaled_inverse_precision_m
-            scaled_inverse_precisions = torch.empty(num_samples)
-            estimates["scaled_inverse_precisions"] = scaled_inverse_precisions
         elif isinstance(model, DDUWrapper):
             time_gmm_neg_log_density_m = AverageMeter()
             times["time_gmm_neg_log_density_m"] = time_gmm_neg_log_density_m
@@ -1693,6 +1724,7 @@ def get_bundle(
                     time_max_prob_of_fbar_m=time_max_prob_of_fbar_m,
                     time_expected_divergence_m=time_expected_divergence_m,
                     time_jsd_m=time_jsd_m,
+                    time_dempster_shafer_value_m=time_dempster_shafer_value_m,
                     expected_entropies=expected_entropies,
                     expected_entropies_plus_expected_divergences=expected_entropies_plus_expected_divergences,
                     one_minus_expected_max_probs=one_minus_expected_max_probs,
@@ -1701,6 +1733,7 @@ def get_bundle(
                     one_minus_max_probs_of_bma=one_minus_max_probs_of_bma,
                     one_minus_max_probs_of_fbar=one_minus_max_probs_of_fbar,
                     jensen_shannon_divergences=jensen_shannon_divergences,
+                    dempster_shafer_values=dempster_shafer_values,
                 )
 
             if isinstance(model, NonIsotropicvMFWrapper):
@@ -1718,14 +1751,6 @@ def get_bundle(
                     batch_size=batch_size,
                     time_risk_value_m=time_risk_value_m,
                     risk_values=risk_values,
-                )
-            elif isinstance(model, DirichletWrapper):
-                update_dirichlet(
-                    inference_dict=inference_dict,
-                    indices=indices,
-                    batch_size=batch_size,
-                    time_scaled_inverse_precision_m=time_scaled_inverse_precision_m,
-                    scaled_inverse_precisions=scaled_inverse_precisions,
                 )
             elif isinstance(model, DDUWrapper):
                 update_ddu(
@@ -1912,6 +1937,7 @@ def get_bundle(
                 one_minus_max_probs_of_bma=one_minus_max_probs_of_bma,
                 one_minus_max_probs_of_fbar=one_minus_max_probs_of_fbar,
                 jensen_shannon_divergences=jensen_shannon_divergences,
+                dempster_shafer_values=dempster_shafer_values,
             )
 
             # GT containers
@@ -2190,21 +2216,19 @@ def convert_inference_dict(model, inference_dict, base_time, args):
             ] = jensen_shannon_divergence
             converted_inference_dict["time_jsd"] = time_jsd
 
-            time_scaled_inverse_precision_start = time.perf_counter()
+            time_dempster_shafer_value_start = time.perf_counter()
             num_classes = alphas.shape[1]
-            scaled_inverse_precision = num_classes / sum_alphas  # [B]
-            time_scaled_inverse_precision_end = time.perf_counter()
-            time_scaled_inverse_precision = (
-                time_scaled_inverse_precision_end
-                - time_scaled_inverse_precision_start
+            dempster_shafer_value = num_classes / sum_alphas  # [B]
+            time_dempster_shafer_value_end = time.perf_counter()
+            time_dempster_shafer_value = (
+                time_dempster_shafer_value_end
+                - time_dempster_shafer_value_start
                 + time_sum_alphas
             )
+            converted_inference_dict["dempster_shafer_value"] = dempster_shafer_value
             converted_inference_dict[
-                "scaled_inverse_precision"
-            ] = scaled_inverse_precision
-            converted_inference_dict[
-                "time_scaled_inverse_precision"
-            ] = time_scaled_inverse_precision
+                "time_dempster_shafer_value"
+            ] = time_dempster_shafer_value
         else:
             logits = inference_dict["logit"]
             if logits.dim() == 2:  # [B, C]
@@ -2325,6 +2349,17 @@ def convert_inference_dict(model, inference_dict, base_time, args):
             ] = jensen_shannon_divergence
             converted_inference_dict["time_jsd"] = time_jsd
 
+            time_dempster_shafer_value_start = time.perf_counter()
+            dempster_shafer_value = dempster_shafer_metric(logits.mean(dim=1))
+            time_dempster_shafer_value_end = time.perf_counter()
+            time_dempster_shafer_value = (
+                time_dempster_shafer_value_end
+                - time_dempster_shafer_value_start
+                + base_time
+            )
+            convert_inference_dict["dempster_shafer_value"] = dempster_shafer_value
+            convert_inference_dict["time_dempster_shafer_value"] = dempster_shafer_value
+
         if isinstance(model, NonIsotropicvMFWrapper):
             converted_inference_dict["nivmf_inverse_kappa"] = inference_dict[
                 "nivmf_inverse_kappa"
@@ -2375,6 +2410,7 @@ def update_logit_based(
     time_max_prob_of_fbar_m,
     time_expected_divergence_m,
     time_jsd_m,
+    time_dempster_shafer_value_m,
     expected_entropies,
     expected_entropies_plus_expected_divergences,
     one_minus_expected_max_probs,
@@ -2383,6 +2419,7 @@ def update_logit_based(
     one_minus_max_probs_of_bma,
     one_minus_max_probs_of_fbar,
     jensen_shannon_divergences,
+    dempster_shafer_values,
 ):
     log_fbars[indices] = inference_dict["log_fbar"]
     log_bmas[indices] = inference_dict["log_bma"]
@@ -2400,6 +2437,9 @@ def update_logit_based(
         inference_dict["time_expected_divergence"], batch_size
     )
     time_jsd_m.update(inference_dict["time_jsd"], batch_size)
+    time_dempster_shafer_value_m.update(
+        inference_dict["time_dempster_shafer_value"], batch_size
+    )
 
     expected_entropies[indices] = inference_dict["expected_entropy"]
     expected_entropies_plus_expected_divergences[indices] = (
@@ -2411,6 +2451,7 @@ def update_logit_based(
     one_minus_max_probs_of_bma[indices] = 1 - inference_dict["max_prob_of_bma"]
     one_minus_max_probs_of_fbar[indices] = 1 - inference_dict["max_prob_of_fbar"]
     jensen_shannon_divergences[indices] = inference_dict["jensen_shannon_divergence"]
+    dempster_shafer_values[indices] = inference_dict["dempster_shafer_value"]
 
 
 def update_nivmf(
@@ -2431,19 +2472,6 @@ def update_losspred(
 ):
     time_risk_value_m.update(inference_dict["time_risk_value"], batch_size)
     risk_values[indices] = inference_dict["risk_value"]
-
-
-def update_dirichlet(
-    inference_dict,
-    indices,
-    batch_size,
-    time_scaled_inverse_precision_m,
-    scaled_inverse_precisions,
-):
-    time_scaled_inverse_precision_m.update(
-        inference_dict["time_scaled_inverse_precision"], batch_size
-    )
-    scaled_inverse_precisions[indices] = inference_dict["scaled_inverse_precision"]
 
 
 def update_ddu(

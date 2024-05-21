@@ -7,6 +7,7 @@ from functools import partial
 
 import torch
 from torch import nn
+import torch.nn.functional as F
 import warnings
 
 from bud.utils.replace import register, replace, register_cond
@@ -118,7 +119,7 @@ class DDUWrapper(TemperatureWrapper):
                     )
 
                 gmm_log_densities = self.gmm.log_prob(
-                    features[:, None, :].cpu()
+                    F.normalize(features, dim=-1)[:, None, :].cpu()
                 ).cuda()  # [B, C]
                 gmm_weighted_log_densities = (
                     gmm_log_densities  # + self.classwise_probs.log()
@@ -177,7 +178,9 @@ class DDUWrapper(TemperatureWrapper):
 
                 end = current_num_samples + actual_batch_size
 
-                features[current_num_samples:end] = feature.detach().cpu()
+                features[current_num_samples:end] = F.normalize(
+                    feature.detach(), dim=-1
+                ).cpu()
                 labels[current_num_samples:end] = label.detach().cpu()
 
                 current_num_samples += actual_batch_size
@@ -187,20 +190,20 @@ class DDUWrapper(TemperatureWrapper):
     def _get_gmm(self, features, labels):
         num_classes = self.model.num_classes
 
-        classwise_probs = (
-            torch.bincount(labels, minlength=num_classes).float() / labels.shape[0]
-        )
+        # classwise_probs = (
+        #     torch.bincount(labels, minlength=num_classes).float() / labels.shape[0]
+        # )
 
         classwise_mean_features = torch.stack(
             [torch.mean(features[labels == c], dim=0) for c in range(num_classes)]
-        )
+        )  # [C, D]
 
         classwise_cov_features = torch.stack(
             [
                 centered_cov(features[labels == c] - classwise_mean_features[c])
                 for c in range(num_classes)
             ]
-        )
+        )  # [C, D, D]
 
         for jitter_eps in JITTERS:
             print("Trying", jitter_eps, "...")
@@ -217,7 +220,7 @@ class DDUWrapper(TemperatureWrapper):
                 )
 
                 self.gmm = gmm
-                self.classwise_probs = classwise_probs.cuda()
+                # self.classwise_probs = classwise_probs.cuda()
                 self.gmm_loc = classwise_mean_features
                 self.gmm_covariance_matrix = jittered_classwise_cov_features
             except RuntimeError:

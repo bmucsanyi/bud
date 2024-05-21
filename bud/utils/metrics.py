@@ -1,11 +1,10 @@
-""" Eval metrics and related
+"""Eval metrics and related
 
 Hacked together by / Copyright 2020 Ross Wightman
                            and 2024 Bálint Mucsányi
 """
 
 import faiss
-import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
 from sklearn.preprocessing import normalize
@@ -198,6 +197,48 @@ def calibration_error(
         raise ValueError(f"Provided norm {norm} not l1 nor inf")
 
     return score
+
+
+def area_under_lift_curve(
+    uncertainties: Tensor, correctnesses: Tensor, reverse_sort: bool = False
+) -> Tensor:
+    batch_size = correctnesses.shape[0]
+
+    if reverse_sort:
+        sorted_idx = torch.flip(
+            torch.argsort(uncertainties), dim=0
+        )  # Most uncertain indices first
+    else:
+        sorted_idx = torch.argsort(uncertainties)  # Most certain indices first
+
+    sorted_correctnesses = correctnesses[sorted_idx]
+    lift = torch.zeros((batch_size,))
+    accuracy = correctnesses.mean()
+    lift[0] = sorted_correctnesses[0] / accuracy
+
+    for i in range(1, batch_size):
+        lift[i] = (i * lift[i - 1] + sorted_correctnesses[i] / accuracy) / (i + 1)
+
+    step = 1 / batch_size
+
+    return lift.sum() * step - 1
+
+
+def relative_area_under_lift_curve(
+    uncertainties: Tensor, correctnesses: Tensor
+) -> Tensor:
+    area = area_under_lift_curve(uncertainties, correctnesses)
+    area_opt = area_under_lift_curve(correctnesses, correctnesses, reverse_sort=True)
+
+    return area / area_opt
+
+
+def dempster_shafer_metric(logits: Tensor) -> Tensor:
+    num_classes = logits.shape[-1]
+    belief_mass = logits.exp().sum(dim=-1)  # [B]
+    dempster_shafer_value = num_classes / (belief_mass + num_classes)
+
+    return dempster_shafer_value
 
 
 def centered_cov(x):
