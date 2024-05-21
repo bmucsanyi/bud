@@ -2358,7 +2358,7 @@ def convert_inference_dict(model, inference_dict, base_time, args):
                 + base_time
             )
             converted_inference_dict["dempster_shafer_value"] = dempster_shafer_value
-            converted_inference_dict["time_dempster_shafer_value"] = dempster_shafer_value
+            converted_inference_dict["time_dempster_shafer_value"] = time_dempster_shafer_value
 
         if isinstance(model, NonIsotropicvMFWrapper):
             converted_inference_dict["nivmf_inverse_kappa"] = inference_dict[
