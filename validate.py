@@ -497,8 +497,10 @@ def evaluate_on_correctness_of_prediction(
         # and all others are incorrect (0).
 
         estimate = -estimates[estimator_name]
-        metrics[f"{key_prefix}{estimator_name}_auroc_zero_shot_correctness"] = auroc(
-            estimate, gt_zero_shot_correctnesses
+        metrics[
+            f"{key_prefix}{estimator_name}_auroc_zero_shot_correctness"
+        ] = calculate_auroc(
+            estimate, gt_zero_shot_correctnesses, args, soft=False
         ).item()
 
         if is_same_task and not isinstance(model, MCInfoNCEWrapper):
@@ -764,8 +766,10 @@ def evaluate_on_abstained_prediction(
 def evaluate_on_ood_detection(estimates, targets, args):
     metrics = {}
     for estimator_name in estimates:
-        metrics[f"mixed_{args.dataset_id}_{estimator_name}_auroc_oodness"] = auroc(
-            estimates[estimator_name], targets["gt_oodness"]
+        metrics[
+            f"mixed_{args.dataset_id}_{estimator_name}_auroc_oodness"
+        ] = calculate_auroc(
+            estimates[estimator_name], targets["gt_oodness"], args, soft=False
         ).item()
 
     return metrics
@@ -1461,7 +1465,7 @@ def evaluate_on_correlation_of_decompositions(
 
 def calculate_auroc(estimate, correctness, args, soft):
     if not soft:
-        return auroc(estimate, correctness)
+        return auroc(correctness, estimate)
 
     num_repetitions = args.num_repetitions
     num_positives = (correctness * num_repetitions).round().long()
@@ -1471,7 +1475,7 @@ def calculate_auroc(estimate, correctness, args, soft):
     unrolled_labels = (comparison_range < num_positives.unsqueeze(1)).long().flatten()
     expanded_estimate = estimate.repeat_interleave(num_repetitions)
 
-    return auroc(expanded_estimate, unrolled_labels)
+    return auroc(unrolled_labels, expanded_estimate)
 
 
 def get_bundle(
@@ -2358,7 +2362,9 @@ def convert_inference_dict(model, inference_dict, base_time, args):
                 + base_time
             )
             converted_inference_dict["dempster_shafer_value"] = dempster_shafer_value
-            converted_inference_dict["time_dempster_shafer_value"] = time_dempster_shafer_value
+            converted_inference_dict[
+                "time_dempster_shafer_value"
+            ] = time_dempster_shafer_value
 
         if isinstance(model, NonIsotropicvMFWrapper):
             converted_inference_dict["nivmf_inverse_kappa"] = inference_dict[

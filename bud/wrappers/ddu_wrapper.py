@@ -119,7 +119,7 @@ class DDUWrapper(TemperatureWrapper):
                     )
 
                 gmm_log_densities = self.gmm.log_prob(
-                    F.normalize(features, dim=-1)[:, None, :].cpu()
+                    features[:, None, :].cpu()
                 ).cuda()  # [B, C]
                 gmm_weighted_log_densities = (
                     gmm_log_densities  # + self.classwise_probs.log()
@@ -178,9 +178,7 @@ class DDUWrapper(TemperatureWrapper):
 
                 end = current_num_samples + actual_batch_size
 
-                features[current_num_samples:end] = F.normalize(
-                    feature.detach(), dim=-1
-                ).cpu()
+                features[current_num_samples:end] = feature.detach().cpu()
                 labels[current_num_samples:end] = label.detach().cpu()
 
                 current_num_samples += actual_batch_size
