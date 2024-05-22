@@ -58,6 +58,8 @@ class HETXLHead(nn.Module):
 
         if not self.is_het:
             logits = self.classifier(pre_logits)  # [B, S, C]
+        else:
+            logits = pre_logits
 
         logits_temperature = logits / self.temperature
 
