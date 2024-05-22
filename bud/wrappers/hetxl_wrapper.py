@@ -10,7 +10,7 @@ from bud.wrappers.model_wrapper import PosteriorWrapper
 
 class HETXLHead(nn.Module):
     def __init__(
-        self, matrix_rank, num_mc_samples, num_features, temperature, classifier
+        self, matrix_rank, num_mc_samples, num_features, temperature, classifier, is_het
     ):
         super().__init__()
         self.matrix_rank = matrix_rank
@@ -28,8 +28,12 @@ class HETXLHead(nn.Module):
 
         self.temperature = temperature
         self.classifier = classifier
+        self.is_het = is_het
 
     def forward(self, features):
+        if self.is_het:
+            features = self.classifier(features)  # D = C
+
         # Shape variables
         B, D = features.shape
         R = self.matrix_rank
@@ -49,8 +53,12 @@ class HETXLHead(nn.Module):
             "bdr,bsr->bsd", low_rank_cov, standard_samples
         )  # [B, S, D]
         samples = einsum_res + diagonal_samples  # [B, S, D]
+
         pre_logits = features.unsqueeze(1) + samples  # [B, S, D]
-        logits = self.classifier(pre_logits)  # [B, S, C]
+
+        if not self.is_het:
+            logits = self.classifier(pre_logits)  # [B, S, C]
+
         logits_temperature = logits / self.temperature
 
         # TODO: https://github.com/google/edward2/blob/main/edward2/jax/nn/heteroscedastic_lib.py#L325
@@ -69,19 +77,22 @@ class HETXLWrapper(PosteriorWrapper):
         matrix_rank: int,
         num_mc_samples: int,
         temperature: float,
+        is_het: bool,
     ):
         super().__init__(model)
 
         self.matrix_rank = matrix_rank
         self.num_mc_samples = num_mc_samples
         self.temperature = temperature
+        self.is_het = is_het
 
         self.classifier = HETXLHead(
             matrix_rank=self.matrix_rank,
             num_mc_samples=self.num_mc_samples,
-            num_features=self.num_features,
+            num_features=self.num_features if not self.is_het else self.num_classes,
             classifier=self.model.get_classifier(),
             temperature=self.temperature,
+            is_het=self.is_het,
         )
 
     @torch.jit.ignore
@@ -93,6 +104,7 @@ class HETXLWrapper(PosteriorWrapper):
         matrix_rank: int = None,
         num_mc_samples: int = None,
         temperature: float = None,
+        is_het: bool = None,
         *args,
         **kwargs
     ):
@@ -105,11 +117,15 @@ class HETXLWrapper(PosteriorWrapper):
         if temperature is not None:
             self.temperature = temperature
 
+        if is_het is not None:
+            self.is_het = is_het
+
         self.model.reset_classifier(*args, **kwargs)
         self.classifier = HETXLHead(
             matrix_rank=self.matrix_rank,
             num_mc_samples=self.num_mc_samples,
-            num_features=self.num_features,
+            num_features=self.num_features if not self.is_het else self.num_classes,
             classifier=self.model.get_classifier(),
             temperature=self.temperature,
+            is_het=self.is_het,
         )

@@ -18,9 +18,10 @@ from utils import (
 from tueplots import bundles
 from tueplots.constants.color import rgb
 
-plt.rcParams.update(
-    bundles.icml2022(family="serif", usetex=True, nrows=1, column="half")
-)
+config = bundles.neurips2023(family="serif", usetex=True, nrows=1, ncols=1)
+config["figure.figsize"] = (2.75, 1.1)
+
+plt.rcParams.update(config)
 
 
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"

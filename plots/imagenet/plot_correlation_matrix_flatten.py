@@ -16,8 +16,9 @@ from utils import (
     create_directory,
 )
 
-config = bundles.icml2022(family="serif", usetex=True, nrows=1, column="half")
-plt.rcParams.update(config)
+plt.rcParams.update(
+    bundles.icml2022(family="serif", usetex=True, nrows=1, column="half")
+)
 
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
 
@@ -47,17 +48,17 @@ def main():
     }
 
     id_to_method = {
-        "hx2ni3sr": "GP",
+        "46elax73": "GP",
         "ktze6y0c": "HET-XL",
-        "7y7e6kjf": "CE Baseline",
+        "3zt619eq": "CE Baseline",
         "f52l00hb": "MC-Dropout",
-        "us8v6277": "SNGP",
+        "ew6b0m1x": "SNGP",
         "795iqrk8": "Shallow Ens.",
         "iskn1vp6": "Corr. Pred.",
-        "wzx8xxbn": "Deep Ens.",
-        "tri75olb": "Laplace",
-        "9ggrs462": "Temperature",
-        "m3duemay": "DDU",
+        "1nz1l6qj": "Deep Ens.",
+        "oyvykqse": "Laplace",
+        "yxvvtw51": "Temperature",
+        "pwpq7bo6": "DDU",
     }
 
     fig, ax = plt.subplots()

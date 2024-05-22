@@ -22,11 +22,8 @@ from utils import (
 
 from tueplots import bundles
 
-# config = bundles.icml2022(family="serif", usetex=True, nrows=1, column="half")
 config = bundles.neurips2023(family="serif", usetex=True, nrows=1, ncols=1)
-config["figure.figsize"] = (2.75, 1.25)
-# config["figure.figsize"] = (3.25, 1.25)
-# config["figure.figsize"] = (3.25, 1.4)
+config["figure.figsize"] = (2.75, 1.1)
 
 plt.rcParams.update(config)
 
@@ -168,7 +165,7 @@ def plot_and_save_aggregated(
             processed_label = label
 
         y_offset = label_offset_dict.get(
-            processed_label, 0.03
+            processed_label, 0.005 * 2 * (y_max - y_min)
         )  # Use the offset if available, otherwise default to 0.03
         ax.text(
             bar.get_x() + bar.get_width() / 2,
@@ -212,6 +209,10 @@ def plot_and_save_aggregated(
         ]
 
         # Adding the legend with adjusted handlelength to make the patches more square-like
+        if "AUC" in suffix:
+            feed_dict = {"bbox_to_anchor": (1, 1.1)}
+        else:
+            feed_dict = {}
         ax.legend(
             frameon=False,
             handles=legend_handles,
@@ -219,6 +220,7 @@ def plot_and_save_aggregated(
             fontsize="small",
             handlelength=1,
             ncol=2,
+            **feed_dict,
         )
 
     ax.set_ylim(bottom=y_min, top=y_max)

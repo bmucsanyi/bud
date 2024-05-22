@@ -1,36 +1,40 @@
 import os
 
 ID_TO_METHOD_CIFAR = {
-    "2vkuhe38": "GP",
+    "wl683ek8": "GP",
     "3vnnnaix": "HET-XL",
     "gypg5gc8": "CE Baseline",
     "9jztoaos": "MC-Dropout",
-    "f32n7c05": "SNGP",
+    "16k5i0w8": "SNGP",
     "03coev3u": "DUQ",
     "6r8nfwqc": "Shallow Ens.",
     "960a6hfa": "Loss Pred.",
     "xsvl0zop": "Corr. Pred.",
     "ymq2jv64": "Deep Ens.",
-    "gkvfnbup": "Laplace",
+    "7kksw6rj": "Laplace",
     "swr2k8kf": "Mahalanobis",
     "n85ctsck": "Temperature",
-    "jntus4ms": "DDU",
+    "f87otin9": "DDU",
+    "5bb431gk": "EDL",
+    "3lptxghb": "PostNet",
 }
 
 ID_TO_METHOD_IMAGENET = {
-    "hx2ni3sr": "GP",
+    "46elax73": "GP",
     "ktze6y0c": "HET-XL",
-    "7y7e6kjf": "CE Baseline",
+    "3zt619eq": "CE Baseline",
     "f52l00hb": "MC-Dropout",
-    "us8v6277": "SNGP",
+    "ew6b0m1x": "SNGP",
     "795iqrk8": "Shallow Ens.",
     "kl7436jj": "Loss Pred.",
     "iskn1vp6": "Corr. Pred.",
-    "wzx8xxbn": "Deep Ens.",
-    "tri75olb": "Laplace",
-    "somhugzm": "Mahalanobis",
-    "9ggrs462": "Temperature",
-    "m3duemay": "DDU",
+    "1nz1l6qj": "Deep Ens.",
+    "oyvykqse": "Laplace",
+    "mp53zl2m": "Mahalanobis",
+    "yxvvtw51": "Temperature",
+    "pwpq7bo6": "DDU",
+    "lr19ead6": "EDL",
+    "xsd2ro6c": "PostNet",
 }
 
 DATASET_CONVERSION_DICT_IMAGENET = {
@@ -69,6 +73,8 @@ POSTERIOR_ESTIMATORS = [
     "Shallow Ens.",
     "Deep Ens.",
     "Laplace",
+    "EDL",
+    "PostNet",
 ]
 
 ESTIMATOR_CONVERSION_DICT = {
@@ -90,6 +96,8 @@ ESTIMATOR_CONVERSION_DICT = {
     "mahalanobis_values": r"$u^\text{mah}$",
     "risk_values": r"$u^\text{rp}$",
     "gmm_neg_log_densities": r"$u^\text{ddu}$",
+    "scaled_inverse_precisions": r"$\text{D-S}$",
+    "dempster_shafer_values": r"$\text{D-S}$",
 }
 
 GT_LABELS = [
