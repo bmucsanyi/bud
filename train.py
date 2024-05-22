@@ -413,7 +413,13 @@ group.add_argument(
     "--matrix-rank",
     default=6,
     type=int,
-    help=("rank of low-rank covariance matrix part in the HET-XL method (default: 6)"),
+    help="rank of low-rank covariance matrix part in the HET-XL method (default: 6)",
+)
+group.add_argument(
+    "--is-het",
+    default=False,
+    type=bool,
+    help="whether to use HET instead of HET-XL (default: False)",
 )
 group.add_argument(
     "--temperature",
@@ -1620,6 +1626,7 @@ def main():
         rbf_length_scale=args.rbf_length_scale,
         ema_momentum=args.ema_momentum,
         matrix_rank=args.matrix_rank,
+        is_het=args.is_het,
         temperature=args.temperature,
         is_last_layer_laplace=args.is_last_layer_laplace,
         pred_type=args.pred_type,

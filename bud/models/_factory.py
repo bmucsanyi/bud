@@ -93,6 +93,7 @@ def create_model(
     rbf_length_scale,
     ema_momentum,
     matrix_rank,
+    is_het,
     temperature,
     is_last_layer_laplace,
     pred_type,
@@ -232,6 +233,7 @@ def create_model(
         rbf_length_scale=rbf_length_scale,
         ema_momentum=ema_momentum,
         matrix_rank=matrix_rank,
+        is_het=is_het,
         temperature=temperature,
         is_last_layer_laplace=is_last_layer_laplace,
         pred_type=pred_type,
@@ -284,6 +286,7 @@ def wrap_model(
     rbf_length_scale,
     ema_momentum,
     matrix_rank,
+    is_het,
     temperature,
     is_last_layer_laplace,
     pred_type,
@@ -370,6 +373,7 @@ def wrap_model(
             matrix_rank=matrix_rank,
             num_mc_samples=num_mc_samples,
             temperature=temperature,
+            is_het=is_het,
         )
     elif model_wrapper_name == "laplace":
         wrapped_model = LaplaceWrapper(
