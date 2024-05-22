@@ -58,7 +58,9 @@ def main():
         "1nz1l6qj": "Deep Ens.",
         "oyvykqse": "Laplace",
         "yxvvtw51": "Temperature",
-        "pwpq7bo6": "DDU",
+        "5exmovzc": "DDU",
+        "lr19ead6": "EDL",
+        "xsd2ro6c": "PostNet",
     }
 
     fig, ax = plt.subplots()

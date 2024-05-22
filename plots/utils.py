@@ -32,7 +32,7 @@ ID_TO_METHOD_IMAGENET = {
     "oyvykqse": "Laplace",
     "mp53zl2m": "Mahalanobis",
     "yxvvtw51": "Temperature",
-    "pwpq7bo6": "DDU",
+    "5exmovzc": "DDU",
     "lr19ead6": "EDL",
     "xsd2ro6c": "PostNet",
 }

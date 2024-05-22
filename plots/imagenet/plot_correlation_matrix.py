@@ -34,7 +34,7 @@ def main():
     api = wandb.Api()
 
     create_directory("results")
-    create_directory(f"results/correlation_matrix")
+    create_directory("results/correlation_matrix")
 
     metric_dict = {
         "auroc_hard_bma_correctness": "Correctness AUROC",
@@ -48,16 +48,19 @@ def main():
     }
 
     id_to_method = {
-        "hx2ni3sr": "GP",
+        "46elax73": "GP",
         "ktze6y0c": "HET-XL",
-        "7y7e6kjf": "CE Baseline",
+        "3zt619eq": "CE Baseline",
         "f52l00hb": "MC-Dropout",
-        "us8v6277": "SNGP",
+        "ew6b0m1x": "SNGP",
         "795iqrk8": "Shallow Ens.",
         "iskn1vp6": "Corr. Pred.",
-        "wzx8xxbn": "Deep Ens.",
-        "tri75olb": "Laplace",
-        "m3duemay": "DDU",
+        "1nz1l6qj": "Deep Ens.",
+        "oyvykqse": "Laplace",
+        "yxvvtw51": "Temperature",
+        "5exmovzc": "DDU",
+        "lr19ead6": "EDL",
+        "xsd2ro6c": "PostNet",
     }
 
     fig, ax = plt.subplots()

@@ -417,8 +417,8 @@ group.add_argument(
 )
 group.add_argument(
     "--is-het",
+    action="store_true",
     default=False,
-    type=bool,
     help="whether to use HET instead of HET-XL (default: False)",
 )
 group.add_argument(
