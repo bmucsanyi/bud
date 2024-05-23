@@ -281,7 +281,13 @@ def excess_area_under_risk_coverage_curve(
 
     return aurc - optimal_aurc
 
-def coverage_for_accuracy(uncertainties: Tensor, correctnesses: Tensor, accuracy: float = 0.95, start_index: int = 200) -> Tensor:
+
+def coverage_for_accuracy(
+    uncertainties: Tensor,
+    correctnesses: Tensor,
+    accuracy: float = 0.95,
+    start_index: int = 200,
+) -> Tensor:
     sorted_indices = torch.argsort(uncertainties)
     correctnesses = correctnesses[sorted_indices]
 
@@ -291,7 +297,10 @@ def coverage_for_accuracy(uncertainties: Tensor, correctnesses: Tensor, accuracy
     coverage_for_accuracy = torch.argmax((cummean_correctnesses < accuracy).float())
 
     # To ignore statistical noise, start measuring at an index greater than 0
-    coverage_for_accuracy_nonstrict = torch.argmax((cummean_correctnesses[start_index:] < accuracy).float()).item() + start_index
+    coverage_for_accuracy_nonstrict = (
+        torch.argmax((cummean_correctnesses[start_index:] < accuracy).float()).item()
+        + start_index
+    )
     if coverage_for_accuracy_nonstrict > start_index:
         # If they were the same, even the first non-noisy measurement didn't satisfy the risk, so its coverage is undue,
         # use the original index. Otherwise, use the non-strict to diffuse noisiness.

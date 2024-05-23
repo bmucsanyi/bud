@@ -33,6 +33,7 @@ from .metrics import (
     relative_area_under_lift_curve,
     area_under_risk_coverage_curve,
     excess_area_under_risk_coverage_curve,
+    coverage_for_accuracy,
 )
 from .misc import (
     ParseKwargs,

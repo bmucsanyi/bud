@@ -39,7 +39,9 @@ class ReaderSoft(Reader):
             self.class_to_idx,
             self.filepath_to_imgid,
         ) = self.load_raw_annotations(os.path.join(root, "annotations.json"))
-        self.soft_labels = torch.from_numpy(self.soft_labels)
+        self.soft_labels = np.concatenate(
+            [self.soft_labels, self.soft_labels.argmax(axis=-1, keepdims=True)], axis=-1
+        )
 
         self.root = os.path.split(root)[0]
         self.samples = self.filepath_to_imgid.keys()
