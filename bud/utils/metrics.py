@@ -298,7 +298,7 @@ def coverage_for_accuracy(
 
     # To ignore statistical noise, start measuring at an index greater than 0
     coverage_for_accuracy_nonstrict = (
-        torch.argmax((cummean_correctnesses[start_index:] < accuracy).float()).item()
+        torch.argmax((cummean_correctnesses[start_index:] < accuracy).float())
         + start_index
     )
     if coverage_for_accuracy_nonstrict > start_index:
