@@ -246,3 +246,56 @@ def centered_cov(x):
     n = x.shape[0]
 
     return 1 / (n - 1) * x.T @ x
+
+
+# https://github.com/IdoGalil/benchmarking-uncertainty-estimation-performance/blob/main/utils/uncertainty_metrics.py
+
+
+def area_under_risk_coverage_curve(
+    uncertainties: Tensor, correctnesses: Tensor
+) -> Tensor:
+    sorted_indices = torch.argsort(uncertainties)
+    correctnesses = correctnesses[sorted_indices]
+    total_samples = uncertainties.shape[0]
+    aurc = torch.tensor(0.0)
+    incorrect_num = 0
+
+    for i in range(total_samples):
+        incorrect_num += 1 - correctnesses[i]
+        aurc += incorrect_num / (i + 1)
+
+    aurc = aurc / total_samples
+
+    return aurc
+
+
+def excess_area_under_risk_coverage_curve(
+    uncertainties: Tensor, correctnesses: Tensor
+) -> Tensor:
+    aurc = area_under_risk_coverage_curve(uncertainties, correctnesses)
+
+    accuracy = correctnesses.float().mean()
+    risk = 1 - accuracy
+    # From https://arxiv.org/abs/1805.08206 :
+    optimal_aurc = risk + (1 - risk) * torch.log(1 - risk)
+
+    return aurc - optimal_aurc
+
+def coverage_for_accuracy(uncertainties: Tensor, correctnesses: Tensor, accuracy: float = 0.95, start_index: int = 200) -> Tensor:
+    sorted_indices = torch.argsort(uncertainties)
+    correctnesses = correctnesses[sorted_indices]
+
+    cumsum_correctnesses = torch.cumsum(correctnesses, dim=0)
+    num_samples = cumsum_correctnesses.shape[0]
+    cummean_correctnesses = cumsum_correctnesses / torch.arange(1, num_samples + 1)
+    coverage_for_accuracy = torch.argmax((cummean_correctnesses < accuracy).float())
+
+    # To ignore statistical noise, start measuring at an index greater than 0
+    coverage_for_accuracy_nonstrict = torch.argmax((cummean_correctnesses[start_index:] < accuracy).float()).item() + start_index
+    if coverage_for_accuracy_nonstrict > start_index:
+        # If they were the same, even the first non-noisy measurement didn't satisfy the risk, so its coverage is undue,
+        # use the original index. Otherwise, use the non-strict to diffuse noisiness.
+        coverage_for_accuracy = coverage_for_accuracy_nonstrict
+
+    coverage_for_accuracy = coverage_for_accuracy / num_samples
+    return coverage_for_accuracy

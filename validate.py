@@ -19,7 +19,6 @@ import torch
 import torch.nn.functional as F
 import torch.nn.parallel
 from scipy.stats import ConstantInputWarning, pearsonr, spearmanr
-from sklearn.metrics import auc
 from sklearn.metrics import roc_auc_score as auroc
 
 from bud.utils import (
@@ -33,7 +32,10 @@ from bud.utils import (
     multiclass_log_probability,
     recall_at_one,
     dempster_shafer_metric,
+    area_under_lift_curve,
     relative_area_under_lift_curve,
+    area_under_risk_coverage_curve,
+    excess_area_under_risk_coverage_curve,
 )
 from bud.wrappers import (
     BaseCorrectnessPredictionWrapper,
@@ -637,127 +639,181 @@ def evaluate_on_abstained_prediction(
             gt_soft_fbar_correctnesses_top5 = targets["gt_soft_fbar_correctnesses_top5"]
             gt_soft_bma_correctnesses_top5 = targets["gt_soft_bma_correctnesses_top5"]
 
-    increasing_count = torch.arange(num_samples) + 1
-    increasing_fraction = increasing_count / num_samples
-
     for estimator_name in estimates:
         estimate = estimates[estimator_name]
 
-        indices = estimate.argsort()  # from least uncertain to most uncertain
-
         metrics[
-            f"{key_prefix}{estimator_name}_cumulative_zero_shot_abstinence_auc"
-        ] = auc(
-            increasing_fraction,
-            gt_zero_shot_correctnesses[indices].cumsum(dim=0) / increasing_count,
+            f"{key_prefix}{estimator_name}_zero_shot_aurc"
+        ] = area_under_risk_coverage_curve(estimate, gt_zero_shot_correctnesses)
+        metrics[f"{key_prefix}{estimator_name}_cumulative_zero_shot_abstinence_auc"] = (
+            1 - metrics[f"{key_prefix}{estimator_name}_zero_shot_aurc"]
         )
+        metrics[
+            f"{key_prefix}{estimator_name}_zero_shot_eaurc"
+        ] = excess_area_under_risk_coverage_curve(estimate, gt_zero_shot_correctnesses)
+        metrics[f"{key_prefix}{estimator_name}_zero_shot_aulc"] = area_under_lift_curve(
+            estimate, gt_zero_shot_correctnesses
+        ).item()
         metrics[
             f"{key_prefix}{estimator_name}_zero_shot_raulc"
         ] = relative_area_under_lift_curve(estimate, gt_zero_shot_correctnesses).item()
 
         if is_same_task and not isinstance(model, MCInfoNCEWrapper):
             metrics[
+                f"{key_prefix}{estimator_name}_hard_fbar_aurc"
+            ] = area_under_risk_coverage_curve(estimate, gt_hard_fbar_correctnesses)
+            metrics[
                 f"{key_prefix}{estimator_name}_cumulative_hard_fbar_abstinence_auc"
-            ] = auc(
-                increasing_fraction,
-                gt_hard_fbar_correctnesses[indices].cumsum(dim=0) / increasing_count,
+            ] = (1 - metrics[f"{key_prefix}{estimator_name}_hard_fbar_aurc"])
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_fbar_eaurc"
+            ] = excess_area_under_risk_coverage_curve(
+                estimate, gt_hard_fbar_correctnesses
             )
             metrics[
-                f"{key_prefix}{estimator_name}_cumulative_hard_bma_abstinence_auc"
-            ] = auc(
-                increasing_fraction,
-                gt_hard_bma_correctnesses[indices].cumsum(dim=0) / increasing_count,
-            )
-
-            metrics[
-                f"{key_prefix}{estimator_name}_cumulative_hard_fbar_abstinence_auc_top5"
-            ] = auc(
-                increasing_fraction,
-                gt_hard_fbar_correctnesses_top5[indices].cumsum(dim=0)
-                / increasing_count,
-            )
-            metrics[
-                f"{key_prefix}{estimator_name}_cumulative_hard_bma_abstinence_auc_top5"
-            ] = auc(
-                increasing_fraction,
-                gt_hard_bma_correctnesses_top5[indices].cumsum(dim=0)
-                / increasing_count,
-            )
-
+                f"{key_prefix}{estimator_name}_hard_fbar_aulc"
+            ] = area_under_lift_curve(estimate, gt_hard_fbar_correctnesses)
             metrics[
                 f"{key_prefix}{estimator_name}_hard_fbar_raulc"
             ] = relative_area_under_lift_curve(estimate, gt_hard_fbar_correctnesses)
+
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_bma_aurc"
+            ] = area_under_risk_coverage_curve(estimate, gt_hard_bma_correctnesses)
+            metrics[
+                f"{key_prefix}{estimator_name}_cumulative_hard_bma_abstinence_auc"
+            ] = (1 - metrics[f"{key_prefix}{estimator_name}_hard_bma_aurc"])
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_bma_eaurc"
+            ] = excess_area_under_risk_coverage_curve(
+                estimate, gt_hard_bma_correctnesses
+            )
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_bma_aulc"
+            ] = area_under_lift_curve(estimate, gt_hard_bma_correctnesses)
             metrics[
                 f"{key_prefix}{estimator_name}_hard_bma_raulc"
-            ] = relative_area_under_lift_curve(
-                estimate,
-                gt_hard_bma_correctnesses,
-            )
+            ] = relative_area_under_lift_curve(estimate, gt_hard_bma_correctnesses)
 
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_fbar_aurc_top5"
+            ] = area_under_risk_coverage_curve(
+                estimate, gt_hard_fbar_correctnesses_top5
+            )
+            metrics[
+                f"{key_prefix}{estimator_name}_cumulative_hard_fbar_abstinence_auc_top5"
+            ] = (1 - metrics[f"{key_prefix}{estimator_name}_hard_fbar_aurc_top5"])
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_fbar_eaurc_top5"
+            ] = excess_area_under_risk_coverage_curve(
+                estimate, gt_hard_fbar_correctnesses_top5
+            )
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_fbar_aulc_top5"
+            ] = area_under_lift_curve(estimate, gt_hard_fbar_correctnesses_top5)
             metrics[
                 f"{key_prefix}{estimator_name}_hard_fbar_raulc_top5"
             ] = relative_area_under_lift_curve(
-                estimate,
-                gt_hard_fbar_correctnesses_top5,
+                estimate, gt_hard_fbar_correctnesses_top5
+            )
+
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_bma_aurc_top5"
+            ] = area_under_risk_coverage_curve(estimate, gt_hard_bma_correctnesses_top5)
+            metrics[
+                f"{key_prefix}{estimator_name}_cumulative_hard_bma_abstinence_auc_top5"
+            ] = (1 - metrics[f"{key_prefix}{estimator_name}_hard_bma_aurc_top5"])
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_bma_eaurc_top5"
+            ] = excess_area_under_risk_coverage_curve(
+                estimate, gt_hard_bma_correctnesses_top5
             )
             metrics[
+                f"{key_prefix}{estimator_name}_hard_bma_aulc_top5"
+            ] = area_under_lift_curve(estimate, gt_hard_bma_correctnesses_top5)
+            metrics[
                 f"{key_prefix}{estimator_name}_hard_bma_raulc_top5"
-            ] = relative_area_under_lift_curve(
-                estimate,
-                gt_hard_bma_correctnesses_top5,
-            )
+            ] = relative_area_under_lift_curve(estimate, gt_hard_bma_correctnesses_top5)
 
             if is_soft_labels:
                 metrics[
+                    f"{key_prefix}{estimator_name}_soft_fbar_aurc"
+                ] = area_under_risk_coverage_curve(estimate, gt_soft_fbar_correctnesses)
+                metrics[
                     f"{key_prefix}{estimator_name}_cumulative_soft_fbar_abstinence_auc"
-                ] = auc(
-                    increasing_fraction,
-                    gt_soft_fbar_correctnesses[indices].cumsum(dim=0)
-                    / increasing_count,
+                ] = (1 - metrics[f"{key_prefix}{estimator_name}_soft_fbar_aurc"])
+                metrics[
+                    f"{key_prefix}{estimator_name}_soft_fbar_eaurc"
+                ] = excess_area_under_risk_coverage_curve(
+                    estimate, gt_soft_fbar_correctnesses
                 )
                 metrics[
-                    f"{key_prefix}{estimator_name}_cumulative_soft_bma_abstinence_auc"
-                ] = auc(
-                    increasing_fraction,
-                    gt_soft_bma_correctnesses[indices].cumsum(dim=0) / increasing_count,
-                )
-
-                metrics[
-                    f"{key_prefix}{estimator_name}_cumulative_soft_fbar_abstinence_auc_top5"
-                ] = auc(
-                    increasing_fraction,
-                    gt_soft_fbar_correctnesses_top5[indices].cumsum(dim=0)
-                    / increasing_count,
-                )
-                metrics[
-                    f"{key_prefix}{estimator_name}_cumulative_soft_bma_abstinence_auc_top5"
-                ] = auc(
-                    increasing_fraction,
-                    gt_soft_bma_correctnesses_top5[indices].cumsum(dim=0)
-                    / increasing_count,
-                )
-
+                    f"{key_prefix}{estimator_name}_soft_fbar_aulc"
+                ] = area_under_lift_curve(estimate, gt_soft_fbar_correctnesses)
                 metrics[
                     f"{key_prefix}{estimator_name}_soft_fbar_raulc"
                 ] = relative_area_under_lift_curve(estimate, gt_soft_fbar_correctnesses)
+
+                metrics[
+                    f"{key_prefix}{estimator_name}_soft_bma_aurc"
+                ] = area_under_risk_coverage_curve(estimate, gt_soft_bma_correctnesses)
+                metrics[
+                    f"{key_prefix}{estimator_name}_cumulative_soft_bma_abstinence_auc"
+                ] = (1 - metrics[f"{key_prefix}{estimator_name}_soft_bma_aurc"])
+                metrics[
+                    f"{key_prefix}{estimator_name}_soft_bma_eaurc"
+                ] = excess_area_under_risk_coverage_curve(
+                    estimate, gt_soft_bma_correctnesses
+                )
+                metrics[
+                    f"{key_prefix}{estimator_name}_soft_bma_aulc"
+                ] = area_under_lift_curve(estimate, gt_soft_bma_correctnesses)
                 metrics[
                     f"{key_prefix}{estimator_name}_soft_bma_raulc"
-                ] = relative_area_under_lift_curve(
-                    estimate,
-                    gt_soft_bma_correctnesses,
-                )
+                ] = relative_area_under_lift_curve(estimate, gt_soft_bma_correctnesses)
 
+                metrics[
+                    f"{key_prefix}{estimator_name}_soft_fbar_aurc_top5"
+                ] = area_under_risk_coverage_curve(
+                    estimate, gt_soft_fbar_correctnesses_top5
+                )
+                metrics[
+                    f"{key_prefix}{estimator_name}_cumulative_soft_fbar_abstinence_auc_top5"
+                ] = (1 - metrics[f"{key_prefix}{estimator_name}_soft_fbar_aurc_top5"])
+                metrics[
+                    f"{key_prefix}{estimator_name}_soft_fbar_eaurc_top5"
+                ] = excess_area_under_risk_coverage_curve(
+                    estimate, gt_soft_fbar_correctnesses_top5
+                )
+                metrics[
+                    f"{key_prefix}{estimator_name}_soft_fbar_aulc_top5"
+                ] = area_under_lift_curve(estimate, gt_soft_fbar_correctnesses_top5)
                 metrics[
                     f"{key_prefix}{estimator_name}_soft_fbar_raulc_top5"
                 ] = relative_area_under_lift_curve(
-                    estimate,
-                    gt_soft_fbar_correctnesses_top5,
+                    estimate, gt_soft_fbar_correctnesses_top5
                 )
+
+                metrics[
+                    f"{key_prefix}{estimator_name}_soft_bma_aurc_top5"
+                ] = area_under_risk_coverage_curve(
+                    estimate, gt_soft_bma_correctnesses_top5
+                )
+                metrics[
+                    f"{key_prefix}{estimator_name}_cumulative_soft_bma_abstinence_auc_top5"
+                ] = (1 - metrics[f"{key_prefix}{estimator_name}_soft_bma_aurc_top5"])
+                metrics[
+                    f"{key_prefix}{estimator_name}_soft_bma_eaurc_top5"
+                ] = excess_area_under_risk_coverage_curve(
+                    estimate, gt_soft_bma_correctnesses_top5
+                )
+                metrics[
+                    f"{key_prefix}{estimator_name}_soft_bma_aulc_top5"
+                ] = area_under_lift_curve(estimate, gt_soft_bma_correctnesses_top5)
                 metrics[
                     f"{key_prefix}{estimator_name}_soft_bma_raulc_top5"
                 ] = relative_area_under_lift_curve(
-                    estimate,
-                    gt_soft_bma_correctnesses_top5,
+                    estimate, gt_soft_bma_correctnesses_top5
                 )
 
     return metrics

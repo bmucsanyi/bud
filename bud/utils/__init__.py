@@ -28,7 +28,11 @@ from .metrics import (
     pct_cropped_has_bigger_pu,
     recall_at_one,
     dempster_shafer_metric,
+    centered_cov,
+    area_under_lift_curve,
     relative_area_under_lift_curve,
+    area_under_risk_coverage_curve,
+    excess_area_under_risk_coverage_curve,
 )
 from .misc import (
     ParseKwargs,

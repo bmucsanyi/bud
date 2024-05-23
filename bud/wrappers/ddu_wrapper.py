@@ -7,12 +7,11 @@ from functools import partial
 
 import torch
 from torch import nn
-import torch.nn.functional as F
 import warnings
 
 from bud.utils.replace import register, replace, register_cond
 from bud.wrappers.temperature_wrapper import TemperatureWrapper
-from bud.utils.metrics import centered_cov
+from bud.utils import centered_cov
 from bud.wrappers.sngp_wrapper import (
     Conv2dSpectralNormalizer,
     LinearSpectralNormalizer,

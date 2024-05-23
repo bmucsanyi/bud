@@ -23,7 +23,6 @@ import os
 import time
 from collections import OrderedDict
 from contextlib import suppress
-from copy import deepcopy
 from datetime import datetime
 from functools import partial
 
