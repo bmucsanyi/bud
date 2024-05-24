@@ -26,6 +26,7 @@ from contextlib import suppress
 from datetime import datetime
 from functools import partial
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -1861,7 +1862,12 @@ def main():
         batch_size=args.batch_size,
         is_training=False,
     )
-    dataset_id_eval_hard.target_transform = lambda target: target.argmax(-1)
+
+    def hard_target_transform(target):
+        if isinstance(target, np.ndarray):  # Soft dataset
+            return target[-1]  # Last entry contains hard label
+
+    dataset_id_eval_hard.target_transform = hard_target_transform
 
     if args.ood_transforms_eval:
         dataset_locations_ood_eval = {}

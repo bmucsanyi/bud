@@ -5,7 +5,7 @@ from tqdm import tqdm
 import wandb
 
 from tueplots import bundles
-from scipy.stats import spearmanr
+from scipy.stats import spearmanr, pearsonr
 import sys
 import json
 
@@ -127,7 +127,7 @@ def main():
         for j in range(len(metric_dict)):
             perf_i = performance_matrix[i, :]
             perf_j = performance_matrix[j, :]
-            correlation_matrix[i, j] = spearmanr(perf_i, perf_j)[0]
+            correlation_matrix[i, j] = pearsonr(perf_i, perf_j)[0]  # spearmanr(perf_i, perf_j)[0]
 
     # Choose a diverging colormap
     cmap = plt.get_cmap("coolwarm")

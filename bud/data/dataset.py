@@ -135,9 +135,6 @@ class IterableImageDataset(data.IterableDataset):
             elif self.transform is not None:
                 img = self.transform(img)
 
-            if img.dtype != torch.float32:
-                print(img.dtype)
-
             if self.target_transform is not None:
                 target = self.target_transform(target)
             yield img, target
@@ -245,11 +242,10 @@ class SoftImageNet(ImageNet):
             os.path.split(self.samples[index][0])[-1]
         ]
         target = self.soft_labels[converted_index, :]
+        augmented_target = np.concatenate([target, [original_target]])
 
         if self.target_transform is not None:
             target = self.target_transform(target)
-
-        augmented_target = np.concatenate([target, [original_target]])
 
         return img, augmented_target
 

@@ -9,7 +9,6 @@ import json
 import os
 
 import numpy as np
-import torch
 from torchvision.datasets.folder import pil_loader
 
 from .img_extensions import get_img_extensions
