@@ -1,4 +1,4 @@
-python plot_half.py "AUROC" "auroc_hard_bma_correctness" --y-min=0.5 --y-max=1 --correct-auroc --label-offsets Mahalanobis --offset-values 0.1
+python plot_half.py "AUROC" "auroc_hard_bma_correctness" --y-min=0.5 --y-max=1 --correct-auroc --label-offsets Mahalanobis --offset-values 0.04
 
 python plot_half.py "Soft AUROC" "auroc_soft_bma_correctness" --y-min=0.5 --y-max=1 --correct-auroc --label-offsets Mahalanobis --offset-values 0.1
 

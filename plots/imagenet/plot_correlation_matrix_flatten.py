@@ -16,9 +16,7 @@ from utils import (
     create_directory,
 )
 
-plt.rcParams.update(
-    bundles.icml2022(family="serif", usetex=True, nrows=1, column="half")
-)
+plt.rcParams.update(bundles.icml2024(family="serif", column="half", usetex=True))
 
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
 
@@ -56,11 +54,9 @@ def main():
         "795iqrk8": "Shallow Ens.",
         "iskn1vp6": "Corr. Pred.",
         "1nz1l6qj": "Deep Ens.",
-        "oyvykqse": "Laplace",
+        "0qpln50b": "Laplace",
         "yxvvtw51": "Temperature",
         "5exmovzc": "DDU",
-        "lr19ead6": "EDL",
-        "xsd2ro6c": "PostNet",
     }
 
     fig, ax = plt.subplots()
@@ -163,7 +159,7 @@ def main():
 
     # Rotate the tick labels and set their alignment
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
-    plt.setp(ax.get_yticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+    # plt.setp(ax.get_yticklabels(), rotation=45, ha="right", rotation_mode="anchor")
 
     # Loop over data dimensions and create text annotations for only the lower triangle
     for i in range(len(metric_dict)):

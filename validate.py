@@ -445,6 +445,11 @@ def evaluate_on_tasks(
         args=args,
         upstream_is_soft_labels=upstream_is_soft_labels,
     )
+    metrics |= evaluate_on_correlation_of_estimators(
+        estimates=estimates,
+        args=args,
+        upstream_is_soft_labels=upstream_is_soft_labels,
+    )
     metrics |= evaluate_on_correlation_of_decompositions(
         model=model,
         estimates=estimates,
@@ -1771,6 +1776,30 @@ def evaluate_on_bregman(
                 metrics[f"{key_prefix}{estimator_name}_mae_bregman_b_bma"] = (
                     (estimate - gt_biases_bregman_bma).abs().mean().item()
                 )
+
+    return metrics
+
+
+def evaluate_on_correlation_of_estimators(
+    estimates,
+    args,
+    upstream_is_soft_labels,
+):
+    metrics = {}
+
+    is_mixed = upstream_is_soft_labels is not None
+    key_prefix = f"mixed_{args.dataset_id}_" if is_mixed else ""
+
+    for estimator_name_1 in estimates:
+        for estimator_name_2 in estimates:
+            if estimator_name_2 <= estimator_name_1:
+                continue
+
+            estimate_1 = estimates[estimator_name_1]
+            estimate_2 = estimates[estimator_name_2]
+            metrics[
+                f"{key_prefix}rank_correlation_{estimator_name_1}_{estimator_name_2}"
+            ] = float(spearmanr(estimate_1, estimate_2)[0])
 
     return metrics
 

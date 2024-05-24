@@ -16,9 +16,7 @@ from utils import (
     create_directory,
 )
 
-plt.rcParams.update(
-    bundles.icml2022(family="serif", usetex=True, nrows=1, column="half")
-)
+plt.rcParams.update(bundles.icml2024(family="serif", column="half", usetex=True))
 
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
 
@@ -56,7 +54,7 @@ def main():
         "795iqrk8": "Shallow Ens.",
         "iskn1vp6": "Corr. Pred.",
         "1nz1l6qj": "Deep Ens.",
-        "oyvykqse": "Laplace",
+        "0qpln50b": "Laplace",
         "yxvvtw51": "Temperature",
         "5exmovzc": "DDU",
         "lr19ead6": "EDL",
@@ -75,7 +73,7 @@ def main():
         sweep = api.sweep(f"bmucsanyi/bias/{method_id}")
 
         for i, (metric_id, metric_name) in enumerate(metric_dict.items()):
-            prefix = id_prefix if metric_name != "OOD (*)" else mixture_prefix
+            prefix = id_prefix if metric_name != "OOD AUROC (*)" else mixture_prefix
 
             estimator_dict = {}
 

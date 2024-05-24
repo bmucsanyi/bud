@@ -22,8 +22,8 @@ from utils import (
 
 from tueplots import bundles
 
-config = bundles.neurips2023(family="serif", usetex=True, nrows=1, ncols=1)
-config["figure.figsize"] = (2.75, 1.1)
+config = bundles.icml2024(family="serif", column="half", usetex=True)
+config["figure.figsize"] = (3.25, 0.98)
 
 plt.rcParams.update(config)
 

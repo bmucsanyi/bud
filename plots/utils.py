@@ -29,7 +29,7 @@ ID_TO_METHOD_IMAGENET = {
     "kl7436jj": "Loss Pred.",
     "iskn1vp6": "Corr. Pred.",
     "1nz1l6qj": "Deep Ens.",
-    "oyvykqse": "Laplace",
+    "0qpln50b": "Laplace",
     "mp53zl2m": "Mahalanobis",
     "yxvvtw51": "Temperature",
     "5exmovzc": "DDU",

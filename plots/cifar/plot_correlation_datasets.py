@@ -15,9 +15,7 @@ sys.path.insert(0, "..")
 
 from utils import ESTIMATOR_CONVERSION_DICT, ESTIMATORLESS_METRICS
 
-plt.rcParams.update(
-    bundles.icml2022(family="serif", usetex=True, nrows=1, column="half")
-)
+plt.rcParams.update(bundles.icml2024(family="serif", column="half", usetex=True))
 
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
 

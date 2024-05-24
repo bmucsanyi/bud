@@ -2760,12 +2760,12 @@ tutorials = ["matplotlib", "pandas", "tabulate"]
 
 [[package]]
 name = "tueplots"
-version = "0.0.10"
-description = "Scientific plotting made easy"
+version = "0.0.15"
+description = "Scientific plotting made easy."
 optional = false
-python-versions = ">=3.8"
+python-versions = ">=3.9"
 files = [
-    {file = "tueplots-0.0.10-py3-none-any.whl", hash = "sha256:e8aaffda2d6b23edfe7a297d8d363c4da92bbec35a290355d50fd97d5fa790b4"},
+    {file = "tueplots-0.0.15-py3-none-any.whl", hash = "sha256:f63e020af88328c78618f3d912612c75c3c91d21004a88fd12cf79dbd9b6d78a"},
 ]
 
 [package.dependencies]
@@ -2900,4 +2900,4 @@ files = [
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.11,<3.13"
-content-hash = "eb549970dc70d0e51229c491d033678ea9c1cd9a1926b817cde87efbb7e18eae"
+content-hash = "3d2481b5921861583b70bab13c7eb90eeafac23e6530041453367a75aa546c2f"
