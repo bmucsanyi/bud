@@ -1,6 +1,6 @@
 """ Optimizer Factory w/ Custom Weight Decay
 Hacked together by / Copyright 2021 Ross Wightman
-                           and 2024 Bálint Mucsányi
+                           and 2024 Anonymous Author
 """
 import logging
 from itertools import islice
