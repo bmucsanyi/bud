@@ -2,9 +2,9 @@
 
 ## Introduction
 
-This repository contains code for the arXiv preprint ["Benchmarking Uncertainty Disentanglement: Specialized Uncertainties for Specialized Tasks"](https://arxiv.org/abs/2402.19460) and also serves as a standalone benchmark suite for future methods.
+This repository contains code for the SPIGM 2024 submission "Benchmarking Uncertainty Disentanglement: Specialized Uncertainties for Specialized Tasks" and also serves as a standalone benchmark suite for future methods.
 
-The `bud` repository extends the [PyTorch Image Models](https://github.com/huggingface/pytorch-image-models/) (`timm`) code base with
+This repository extends the [PyTorch Image Models](https://github.com/huggingface/pytorch-image-models/) (`timm`) code base with
 - implementations of various uncertainty quantification methods as convenient wrapper classes ... (`bud.wrappers`)
 - ... and corresponding loss functions (`bud.losses`)
 - an extended training loop that supports these methods out of the box (`train.py`)
@@ -12,16 +12,6 @@ The `bud` repository extends the [PyTorch Image Models](https://github.com/huggi
 - support for CIFAR-10 ResNet variants, including Wide ResNets
 - plotting utilities to recreate the plots of the preprint
 - scripts to reproduce the results of the preprint
-
-If you found the paper or the code useful in your research, please cite our work as
-```
-@article{mucsanyi2024benchmarking,
-  title={Benchmarking Uncertainty Disentanglement: Specialized Uncertainties for Specialized Tasks},
-  author={Mucs{\'a}nyi, B{\'a}lint and Kirchhof, Michael and Oh, Seong Joon},
-  journal={arXiv preprint arXiv:2402.19460},
-  year={2024}
-}
-```
 
 If you use the benchmark, please also cite the datasets it uses.
 
@@ -46,8 +36,5 @@ The ImageNet-ReaL labels are available in [this GitHub repository](https://githu
 
 We provide scripts that reproduce our results.
 These are found in the `scripts` folder for both ImageNet and CIFAR-10 and are named after the respective method.
-
-We also provide access to the exact [Singularity container](https://drive.google.com/file/d/1eYClorSZe3FMNFCZiXGLuSQJizMgPNfq/view?usp=sharing) we used in our experiments.
-The `singularity_recipe.rcp` file was used to create this container.
 
 To recreate the plots used in the paper, use `plots/imagenet/create_imagenet_plots.sh` for the main paper's ImageNet results and the individual scripts in the `plots` folder for all other results (incl. appendix figures). To use these utilities, you have to specify your `wandb` API key in `wandb_key.json`.
