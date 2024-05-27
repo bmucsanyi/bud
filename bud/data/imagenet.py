@@ -1,6 +1,6 @@
 """Minimal ImageNet dataset that only requires train and val folders
 
-Hacked together by / Copyright 2024 Bálint Mucsányi
+Hacked together by / Copyright 2024 Anonymous Author
 """
 
 import os

@@ -1,7 +1,7 @@
 """ Model / state_dict utils
 
 Hacked together by / Copyright 2020 Ross Wightman
-                           and 2024 Bálint Mucsányi
+                           and 2024 Anonymous Author
 """
 import fnmatch
 from copy import deepcopy

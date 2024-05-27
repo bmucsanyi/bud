@@ -1,7 +1,7 @@
 """ Quick n Simple Image Folder, Tarfile based DataSet
 
 Hacked together by / Copyright 2019 Ross Wightman
-                           and 2024 Bálint Mucsányi
+                           and 2024 Anonymous Author
 """
 
 import json

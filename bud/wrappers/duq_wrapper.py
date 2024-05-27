@@ -97,7 +97,6 @@ class DUQHead(nn.Module):
                 "logit": logit,  # [B, C]
                 "feature": features,  # [B, D]
                 "duq_value": 1 - rbf_values.max(dim=1)[0],  # [B]
-                # TODO: ask Michael about .mul(-1) vs 1 / x
             }
 
 

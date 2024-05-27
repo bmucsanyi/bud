@@ -1,7 +1,7 @@
 """Eval metrics and related
 
 Hacked together by / Copyright 2020 Ross Wightman
-                           and 2024 Bálint Mucsányi
+                           and 2024 Anonymous Author
 """
 
 import faiss
