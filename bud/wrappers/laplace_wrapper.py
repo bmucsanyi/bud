@@ -28,6 +28,7 @@ class LaplaceWrapper(PosteriorWrapper):
         self,
         model: nn.Module,
         num_mc_samples: int,
+        num_mc_samples_cv: int,
         weight_path: str,
         is_last_layer_laplace: bool,
         pred_type: str,  # "glm", "nn"
@@ -38,6 +39,7 @@ class LaplaceWrapper(PosteriorWrapper):
         super().__init__(model)
 
         self.num_mc_samples = num_mc_samples
+        self.num_mc_samples_cv = num_mc_samples_cv
         self.weight_path = weight_path
         self.laplace_model = None
         self.is_last_layer_laplace = is_last_layer_laplace
@@ -69,8 +71,6 @@ class LaplaceWrapper(PosteriorWrapper):
             self.optimize_prior_precision_cv(
                 pred_type=self.pred_type,
                 val_loader=val_loader,
-                link_approx=self.link_approx,
-                n_samples=max(50, self.num_mc_samples),
             )
         else:
             self.laplace_model.optimize_prior_precision(
@@ -102,7 +102,7 @@ class LaplaceWrapper(PosteriorWrapper):
                 "logit": self.laplace_model.predictive_samples(
                     x=inputs,
                     pred_type=self.pred_type,
-                    n_samples=self.num_mc_samples,  # TODO: try 100 samples
+                    n_samples=self.num_mc_samples,
                 )
                 .log()
                 .clamp(min=torch.finfo(feature.dtype).min)
@@ -118,21 +118,18 @@ class LaplaceWrapper(PosteriorWrapper):
 
     def optimize_prior_precision_cv(
         self,
-        pred_type,
         val_loader,
-        link_approx="probit",
         log_prior_prec_min=-4,
         log_prior_prec_max=4,
         grid_size=100,
-        n_samples=100,
     ):
         interval = torch.logspace(log_prior_prec_min, log_prior_prec_max, grid_size)
         self.laplace_model.prior_precision = self.gridsearch(
             interval=interval,
             val_loader=val_loader,
-            pred_type=pred_type,
-            link_approx=link_approx,
-            n_samples=n_samples,
+            pred_type=self.pred_type,
+            link_approx=self.link_approx,
+            n_samples=self.num_mc_samples_cv,
         )
 
         print(f"Optimized prior precision is {self.laplace_model.prior_precision}.")
@@ -162,7 +159,7 @@ class LaplaceWrapper(PosteriorWrapper):
             except RuntimeError as error:
                 print(f"Caught an exception in validate: {error}")
                 result = float("inf")
-            print(f"Took {time.perf_counter() - start_time} seconds")
+            print(f"Took {time.perf_counter() - start_time} seconds, result: {result}")
             results.append(result)
             prior_precs.append(prior_prec)
         return prior_precs[np.argmin(results)]

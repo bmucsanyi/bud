@@ -389,6 +389,15 @@ group.add_argument(
     help="number of Monte Carlo samples in the uncertainty method (default: 10)",
 )
 group.add_argument(
+    "--num-mc-samples-cv",
+    default=50,
+    type=int,
+    help=(
+        "number of Monte Carlo samples in the prior precision CV of the Laplace method "
+        "(default: 50)"
+    ),
+)
+group.add_argument(
     "--rbf-length-scale",
     default=0.1,
     type=float,
@@ -1057,12 +1066,14 @@ group.add_argument(
     metavar="N",
     help="epochs to warmup LR, if scheduler supports (default: 0)",
 )
-group.add_argument(
-    "--warmup-prefix",
-    action="store_true",
-    default=False,
-    help="exclude warmup period from decay schedule (default: False)",
-),
+(
+    group.add_argument(
+        "--warmup-prefix",
+        action="store_true",
+        default=False,
+        help="exclude warmup period from decay schedule (default: False)",
+    ),
+)
 group.add_argument(
     "--cooldown-epochs",
     type=int,
@@ -1130,13 +1141,15 @@ group.add_argument(
     metavar="PCT",
     help="color jitter factor (default: 0.4)",
 )
-group.add_argument(
-    "--aa",
-    type=str,
-    default=None,
-    metavar="NAME",
-    help='use AutoAugment policy ("v0", "original") (default: None)',
-),
+(
+    group.add_argument(
+        "--aa",
+        type=str,
+        default=None,
+        metavar="NAME",
+        help='use AutoAugment policy ("v0", "original") (default: None)',
+    ),
+)
 group.add_argument(
     "--aug-repeats",
     type=float,
@@ -1623,6 +1636,7 @@ def main():
         dropout_probability=args.dropout_probability,
         is_filterwise_dropout=args.is_filterwise_dropout,
         num_mc_samples=args.num_mc_samples,
+        num_mc_samples_cv=args.num_mc_samples_cv,
         rbf_length_scale=args.rbf_length_scale,
         ema_momentum=args.ema_momentum,
         matrix_rank=args.matrix_rank,
@@ -2191,7 +2205,9 @@ def main():
             scaler=args.edl_scaler,
         )
     elif args.loss == "uce":
-        train_loss_fn = RegularizedUCELoss(regularization_factor=args.uce_regularization_factor)
+        train_loss_fn = RegularizedUCELoss(
+            regularization_factor=args.uce_regularization_factor
+        )
     else:
         raise NotImplementedError(f"--loss {args.loss} is not implemented.")
     train_loss_fn = train_loss_fn.to(device=device)
