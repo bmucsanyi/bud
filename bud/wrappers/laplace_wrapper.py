@@ -69,7 +69,6 @@ class LaplaceWrapper(PosteriorWrapper):
 
         if self.prior_optimization_method == "CV":
             self.optimize_prior_precision_cv(
-                pred_type=self.pred_type,
                 val_loader=val_loader,
             )
         else:
