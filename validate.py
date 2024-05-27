@@ -1718,9 +1718,7 @@ def evaluate_on_bregman(
 
             metrics[
                 f"{key_prefix}{estimator_name}_auroc_multiple_labels"
-            ] = calculate_auroc(
-                estimate, multi_label_indices, args, soft=False
-            ).item()
+            ] = calculate_auroc(estimate, multi_label_indices, args, soft=False).item()
 
         if is_same_task and not isinstance(model, MCInfoNCEWrapper):
             metrics[
