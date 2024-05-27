@@ -5,7 +5,7 @@ from tqdm import tqdm
 import wandb
 
 from tueplots import bundles
-from scipy.stats import spearmanr
+from scipy.stats import pearsonr
 import sys
 import json
 
@@ -15,9 +15,7 @@ from utils import (
     ESTIMATOR_CONVERSION_DICT,
     create_directory,
 )
-
 plt.rcParams.update(bundles.icml2024(family="serif", column="half", usetex=True))
-
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
 
 
@@ -36,13 +34,13 @@ def main():
 
     metric_dict = {
         "auroc_hard_bma_correctness": "Correctness AUROC",
-        "ece_hard_bma_correctness": "-ECE (*)",
+        "ece_hard_bma_correctness": "-ECE",
         "brier_score_hard_bma_correctness": "Brier Score",
         "log_prob_score_hard_bma_correctness": "Log Prob. Score",
         "cumulative_hard_bma_abstinence_auc": "Abstinence AUC",
         "hard_bma_accuracy": "Accuracy",
         "rank_correlation_bregman_au": "Aleatoric Rank Corr.",
-        "auroc_oodness": "OOD AUROC (*)",
+        "auroc_oodness": "OOD AUROC",
     }
 
     id_to_method = {
@@ -57,8 +55,6 @@ def main():
         "0qpln50b": "Laplace",
         "yxvvtw51": "Temperature",
         "5exmovzc": "DDU",
-        "lr19ead6": "EDL",
-        "xsd2ro6c": "PostNet",
     }
 
     fig, ax = plt.subplots()
@@ -73,7 +69,7 @@ def main():
         sweep = api.sweep(f"bmucsanyi/bias/{method_id}")
 
         for i, (metric_id, metric_name) in enumerate(metric_dict.items()):
-            prefix = id_prefix if metric_name != "OOD AUROC (*)" else mixture_prefix
+            prefix = id_prefix if metric_name != "OOD AUROC" else mixture_prefix
 
             estimator_dict = {}
 
@@ -97,7 +93,7 @@ def main():
                         else:
                             estimator_dict[stripped_key].append(run.summary[key])
 
-                        if metric_name == "-ECE (*)":
+                        if metric_name == "-ECE":
                             estimator_dict[stripped_key][-1] *= -1
 
             for key in tuple(estimator_dict.keys()):
@@ -109,7 +105,7 @@ def main():
                 if method_name == "Corr. Pred.":
                     estimator = "error_probabilities"
                 else:
-                    estimator = "one_minus_max_probs_of_fbar"
+                    estimator = "one_minus_expected_max_probs"
             else:
                 estimator = next(iter(estimator_dict.keys()))
 
@@ -119,7 +115,7 @@ def main():
         for j in range(len(metric_dict)):
             perf_i = performance_matrix[i, :]
             perf_j = performance_matrix[j, :]
-            correlation_matrix[i, j] = spearmanr(perf_i, perf_j)[0]
+            correlation_matrix[i, j] = pearsonr(perf_i, perf_j)[0]
 
     # Choose a diverging colormap
     cmap = plt.get_cmap("coolwarm")
@@ -138,7 +134,8 @@ def main():
     cbar.outline.set_visible(False)
     cbar.ax.tick_params(width=0.1)
     cbar.set_ticks([-0.983, 0, 1.01])
-    cbar.set_ticklabels(["-1 (Neg. Corr.)", "0 (No Corr.)", "1 (Pos. Corr.)"])
+    # cbar.set_ticklabels(["-1 (Neg. Corr.)", "0 (No Corr.)", "1 (Pos. Corr.)"])
+    cbar.set_ticklabels(["-1", "0", "1"])
 
     # Set ticks
     ax.set_xticks(np.arange(len(metric_dict)))

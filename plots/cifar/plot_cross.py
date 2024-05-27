@@ -12,7 +12,7 @@ from utils import ID_TO_METHOD_CIFAR, create_directory
 from tueplots import bundles
 
 config = bundles.icml2024(family="serif", column="half", usetex=True)
-config["figure.figsize"] = (3.25, 0.98)
+config["figure.figsize"] = (3.25, 1.7)
 
 plt.rcParams.update(config)
 

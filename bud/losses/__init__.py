@@ -13,4 +13,4 @@ from .mcinfonce_loss import MCInfoNCELoss
 from .nivmf_loss import NonIsotropicVMFLoss
 from .loss_prediction_loss import LossPredictionLoss
 from .edl_loss import EDLLoss
-from .uce_loss import UCELoss
+from .regularized_uce_loss import RegularizedUCELoss

@@ -20,14 +20,12 @@ from utils import (
 )
 
 from tueplots import bundles
+from matplotlib.ticker import MultipleLocator
 
 config = bundles.icml2024(family="serif", column="half", usetex=True)
 config["figure.figsize"] = (3.25, 0.98)
 
 plt.rcParams.update(config)
-
-from matplotlib.ticker import MultipleLocator
-
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
 
 
@@ -236,7 +234,7 @@ def main(args):
 
     for prefix in DATASET_CONVERSION_DICT_CIFAR:
         create_directory("results")
-        create_directory(f"results/gp_eu")
+        create_directory("results/gp_eu")
         create_directory(f"results/gp_eu/{prefix.replace('/', '-')}")
         aggregated_estimators = {}
         aggregated_estimators_mins_maxs = {}

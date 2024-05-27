@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from torch.distributions import Dirichlet
 
 
-class UCELoss(nn.Module):
+class RegularizedUCELoss(nn.Module):
     def __init__(self, regularization_factor: float) -> None:
         super().__init__()
 

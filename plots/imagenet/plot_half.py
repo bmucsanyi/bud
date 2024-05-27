@@ -21,14 +21,11 @@ from utils import (
 )
 
 from tueplots import bundles
+from matplotlib.ticker import MultipleLocator
 
 config = bundles.icml2024(family="serif", column="half", usetex=True)
 config["figure.figsize"] = (3.25, 0.98)
-
 plt.rcParams.update(config)
-
-from matplotlib.ticker import MultipleLocator
-
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
 
 
@@ -250,7 +247,9 @@ def main(args):
             return abs(x)
 
     else:
-        func = lambda x: x
+
+        def func(x):
+            return x
 
     for prefix in DATASET_CONVERSION_DICT_IMAGENET:
         create_directory("results")

@@ -13,14 +13,11 @@ from utils import (
     ESTIMATOR_CONVERSION_DICT,
     create_directory,
 )
-
 from tueplots import bundles
 
 config = bundles.icml2024(family="serif", column="half", usetex=True)
 config["figure.figsize"] = (3.25, 0.98)
-
 plt.rcParams.update(config)
-
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
 
 

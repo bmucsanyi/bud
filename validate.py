@@ -1686,6 +1686,7 @@ def evaluate_on_bregman(
 
     if is_soft_labels:
         gt_aleatorics_bregman = targets["gt_aleatorics_bregman"]
+        multi_label_indices = (gt_aleatorics_bregman > 0).int()
 
     if not isinstance(model, MCInfoNCEWrapper):
         gt_epistemics_bregman = targets["gt_epistemics_bregman"]
@@ -1714,6 +1715,12 @@ def evaluate_on_bregman(
             metrics[f"{key_prefix}{estimator_name}_mae_bregman_au"] = (
                 (estimate - gt_aleatorics_bregman).abs().mean().item()
             )
+
+            metrics[
+                f"{key_prefix}{estimator_name}_auroc_multiple_labels"
+            ] = calculate_auroc(
+                estimate, multi_label_indices, args, soft=False
+            ).item()
 
         if is_same_task and not isinstance(model, MCInfoNCEWrapper):
             metrics[

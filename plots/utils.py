@@ -14,7 +14,7 @@ ID_TO_METHOD_CIFAR = {
     "7kksw6rj": "Laplace",
     "swr2k8kf": "Mahalanobis",
     "n85ctsck": "Temperature",
-    "f87otin9": "DDU",
+    "oj31fxin": "DDU",
     "5bb431gk": "EDL",
     "3lptxghb": "PostNet",
 }

@@ -1,4 +1,3 @@
-import os
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1.inset_locator import mark_inset
 
@@ -18,7 +17,7 @@ from utils import (
 from tueplots import bundles
 
 config = bundles.icml2024(family="serif", column="half", usetex=True)
-config["figure.figsize"] = (3.25, 0.98)
+config["figure.figsize"] = (3.5, config["figure.figsize"][1])
 
 plt.rcParams.update(config)
 
@@ -33,11 +32,12 @@ def main():
     api = wandb.Api()
 
     id_to_method = {
-        "2vkuhe38": "GP",
-        "f32n7c05": "SNGP",
-        "ymq2jv64": "Deep Ensemble",
-        "9jztoaos": "MC-Dropout",
+        "wl683ek8": "GP",
         "gypg5gc8": "CE Baseline",
+        "ymq2jv64": "Deep Ens.",
+        "n85ctsck": "Temperature",
+        "oj31fxin": "DDU",
+        "5bb431gk": "EDL",
     }
 
     dataset_conversion_dict = {
@@ -50,7 +50,7 @@ def main():
     }
 
     create_directory("results")
-    create_directory(f"results/ece_generalization")
+    create_directory("results/ece_generalization")
 
     fig, ax = plt.subplots()
     axins = fig.add_axes([0.2, 0.5, 0.1, 0.4])
@@ -140,12 +140,12 @@ def main():
     ax.legend(
         [h[0] for h in handles],
         labels,
-        bbox_to_anchor=(0.5, 1),
-        loc="upper center",
+        bbox_to_anchor=(1.4, 0.5),
+        loc="center right",
         frameon=False,
     )
     ax.grid(True, linewidth=0.5)
-    save_path = f"results/ece_generalization/ece_full.pdf"
+    save_path = "results/ece_generalization/ece_full.pdf"
     plt.savefig(save_path)
     plt.clf()  # Clear the figure for the next plot
 

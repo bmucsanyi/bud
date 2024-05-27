@@ -12,6 +12,7 @@ sys.path.insert(0, "..")
 from utils import (
     DATASET_CONVERSION_DICT_CIFAR,
     ESTIMATOR_CONVERSION_DICT,
+    ID_TO_METHOD_CIFAR,
     create_directory,
 )
 
@@ -19,32 +20,12 @@ from tueplots import bundles
 from tueplots.constants.color import rgb
 
 config = bundles.icml2024(family="serif", column="half", usetex=True)
-config["figure.figsize"] = (3.25, 0.98)
+# config["figure.figsize"] = (3.25, 1.6)
 
 plt.rcParams.update(config)
 
 
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
-
-GT_LABELS = [
-    r"$\text{PU}^\text{b}$",
-    r"$\text{B}^\text{b}$",
-    r"$\text{AU}^\text{b} + \text{B}^\text{b}$",
-    r"$\text{AU}^\text{b}$",
-]
-
-POSTERIOR_ESTIMATORS = [
-    "GP",
-    "HET-XL",
-    "CE Baseline",
-    "MC-Dropout",
-    "SNGP",
-    "DUQ",
-    "Shallow Ensemble",
-    "Correctness Prediction",
-    "Deep Ensemble",
-    "Laplace",
-]
 
 
 def plot_and_save(label_x, label_y, metric_x, metric_y, key_x, key_y, save_path):
@@ -220,10 +201,10 @@ def plot_and_save_aggregated_shared_axes(
     fig.legend(
         handles=list(legend_handles.values()),
         labels=list(legend_handles.keys()),
-        loc="center left",
-        bbox_to_anchor=(0.6333, 0.479),
-        borderpad=0.1,
-        # frameon=False,
+        loc="center right",
+        bbox_to_anchor=(1.25, 0.55),
+        # borderpad=0.1,
+        frameon=False,
     )
     plt.savefig(save_path)
     plt.close()
@@ -235,21 +216,6 @@ def main(args):
 
     wandb.login(key=wandb_key)
     api = wandb.Api()
-
-    id_to_method = {
-        "2vkuhe38": "GP",
-        "3vnnnaix": "HET-XL",
-        "gypg5gc8": "CE Baseline",
-        "9jztoaos": "MC-Dropout",
-        "f32n7c05": "SNGP",
-        "03coev3u": "DUQ",
-        "6r8nfwqc": "Shallow Ensemble",
-        "960a6hfa": "Loss Prediction",
-        "xsvl0zop": "Correctness Prediction",
-        "ymq2jv64": "Deep Ensemble",
-        "gkvfnbup": "Laplace",
-        "swr2k8kf": "Mahalanobis",
-    }
 
     suffix_x = args.metric_x
     suffix_y = args.metric_y
@@ -265,7 +231,7 @@ def main(args):
         data_ys_opt_x = {}
         data_ys_opt_y = {}
 
-        for method_id, method_name in tqdm(id_to_method.items()):
+        for method_id, method_name in tqdm(ID_TO_METHOD_CIFAR.items()):
             sweep = api.sweep(f"bmucsanyi/bias/{method_id}")
 
             metric_x = {}

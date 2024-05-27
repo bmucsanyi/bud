@@ -248,7 +248,6 @@ class PostNetWrapper(DirichletWrapper):
             )
 
         self.sample_count_per_class = sample_count_per_class.to(device)
-        print(self.sample_count_per_class)
 
     def forward_head(self, x, pre_logits: bool = False):
         if self.sample_count_per_class is None:

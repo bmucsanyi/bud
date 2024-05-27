@@ -8,14 +8,11 @@ import json
 sys.path.insert(0, "..")
 
 from utils import ID_TO_METHOD_IMAGENET, create_directory
-
 from tueplots import bundles
 
 config = bundles.icml2024(family="serif", column="half", usetex=True)
-config["figure.figsize"] = (3.25, 0.98)
-
+config["figure.figsize"] = (3.25, 1.7)
 plt.rcParams.update(config)
-
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
 
 
@@ -223,8 +220,8 @@ def main():
             handles,
             labels,
             frameon=False,
-            loc="lower left",
-            bbox_to_anchor=(-0.02, -0.1),
+            # loc="lower left",
+            # bbox_to_anchor=(-0.02, -0.1),
         )
         plt.grid(True, linewidth=0.5)
         plt.savefig(save_path)

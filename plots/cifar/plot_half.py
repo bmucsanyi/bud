@@ -21,14 +21,11 @@ from utils import (
 )
 
 from tueplots import bundles
+from matplotlib.ticker import MultipleLocator
 
 config = bundles.icml2024(family="serif", column="half", usetex=True)
 config["figure.figsize"] = (3.25, 0.98)
-
 plt.rcParams.update(config)
-
-from matplotlib.ticker import MultipleLocator
-
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
 
 
@@ -164,7 +161,7 @@ def plot_and_save_aggregated(
             processed_label = label
 
         y_offset = label_offset_dict.get(
-            processed_label, 0.03
+            processed_label, 0.005 * 2 * (y_max - y_min)
         )  # Use the offset if available, otherwise default to 0.03
         ax.text(
             bar.get_x() + bar.get_width() / 2,
@@ -217,14 +214,20 @@ def plot_and_save_aggregated(
         #     handlelength=1,
         #     ncol=2,
         # )
+        if "AUROC" in suffix:
+            feed_dict = {"bbox_to_anchor": (1, 1.1)}
+        elif "AUC" in suffix:
+            feed_dict = {"bbox_to_anchor": (1, 1.25)}
+        else:
+            feed_dict = {}
         ax.legend(
             frameon=False,
-            bbox_to_anchor=(1, 1.09),
             handles=legend_handles,
             loc="upper right",
             fontsize="small",
             handlelength=1,
             ncol=2,
+            **feed_dict,
         )
 
     ax.set_ylim(bottom=y_min, top=y_max)
@@ -254,7 +257,9 @@ def main(args):
             return abs(x)
 
     else:
-        func = lambda x: x
+
+        def func(x):
+            return x
 
     for prefix in DATASET_CONVERSION_DICT_CIFAR:
         create_directory("results")

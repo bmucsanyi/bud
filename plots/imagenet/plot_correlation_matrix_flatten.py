@@ -5,7 +5,7 @@ from tqdm import tqdm
 import wandb
 
 from tueplots import bundles
-from scipy.stats import spearmanr, pearsonr
+from scipy.stats import pearsonr
 import sys
 import json
 
@@ -17,7 +17,6 @@ from utils import (
 )
 
 plt.rcParams.update(bundles.icml2024(family="serif", column="half", usetex=True))
-
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
 
 
@@ -36,13 +35,13 @@ def main():
 
     metric_dict = {
         "auroc_hard_bma_correctness": "Correctness AUROC",
-        "ece_hard_bma_correctness": "-ECE (*)",
+        "ece_hard_bma_correctness": "-ECE",
         "brier_score_hard_bma_correctness": "Brier Score",
         "log_prob_score_hard_bma_correctness": "Log Prob. Score",
         "cumulative_hard_bma_abstinence_auc": "Abstinence AUC",
         "hard_bma_accuracy": "Accuracy",
         "rank_correlation_bregman_au": "Aleatoric Rank Corr.",
-        "auroc_oodness": "OOD AUROC (*)",
+        "auroc_oodness": "OOD AUROC",
     }
 
     id_to_method = {
@@ -78,7 +77,7 @@ def main():
             sweep = api.sweep(f"bmucsanyi/bias/{method_id}")
 
             for i, (metric_id, metric_name) in enumerate(metric_dict.items()):
-                prefix = id_prefix if metric_name != "OOD AUROC (*)" else mixture_prefix
+                prefix = id_prefix if metric_name != "OOD AUROC" else mixture_prefix
 
                 estimator_dict = {}
 
@@ -103,7 +102,7 @@ def main():
                             else:
                                 estimator_dict[stripped_key].append(run.summary[key])
 
-                            if metric_name == "-ECE (*)":
+                            if metric_name == "-ECE":
                                 estimator_dict[stripped_key][-1] *= -1
 
                 for key in tuple(estimator_dict.keys()):
@@ -127,7 +126,7 @@ def main():
         for j in range(len(metric_dict)):
             perf_i = performance_matrix[i, :]
             perf_j = performance_matrix[j, :]
-            correlation_matrix[i, j] = pearsonr(perf_i, perf_j)[0]  # spearmanr(perf_i, perf_j)[0]
+            correlation_matrix[i, j] = pearsonr(perf_i, perf_j)[0]
 
     # Choose a diverging colormap
     cmap = plt.get_cmap("coolwarm")

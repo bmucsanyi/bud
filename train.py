@@ -52,7 +52,7 @@ from bud.losses import (
     CorrectnessPredictionLoss,
     DUQLoss,
     EDLLoss,
-    UCELoss,
+    RegularizedUCELoss,
     FBarCrossEntropyLoss,
     JsdCrossEntropyLoss,
     LabelSmoothingCrossEntropyLoss,
@@ -110,7 +110,7 @@ try:
     from functorch.compile import memory_efficient_fusion
 
     has_functorch = True
-except ImportError as e:
+except ImportError:
     has_functorch = False
 
 has_compile = hasattr(torch, "compile")
@@ -2191,7 +2191,7 @@ def main():
             scaler=args.edl_scaler,
         )
     elif args.loss == "uce":
-        train_loss_fn = UCELoss(regularization_factor=args.uce_regularization_factor)
+        train_loss_fn = RegularizedUCELoss(regularization_factor=args.uce_regularization_factor)
     else:
         raise NotImplementedError(f"--loss {args.loss} is not implemented.")
     train_loss_fn = train_loss_fn.to(device=device)

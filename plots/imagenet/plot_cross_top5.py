@@ -8,14 +8,11 @@ import json
 sys.path.insert(0, "..")
 
 from utils import ID_TO_METHOD_IMAGENET, create_directory
-
 from tueplots import bundles
 
 config = bundles.icml2024(family="serif", column="half", usetex=True)
 config["figure.figsize"] = (3.25, 0.98)
-
 plt.rcParams.update(config)
-
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
 
 
@@ -211,7 +208,7 @@ def main():
         )
 
         plt.xlabel("Severity Level")
-        plt.ylabel(rf"Metric Values $\uparrow$")
+        plt.ylabel(r"Metric Values $\uparrow$")
         plt.ylim(0, 1)
 
         handles, labels = plt.gca().get_legend_handles_labels()

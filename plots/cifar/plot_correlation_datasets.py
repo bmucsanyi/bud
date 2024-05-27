@@ -43,9 +43,9 @@ def main():
         "Loss Pred.": ("kl7436jj", "960a6hfa"),
         "Corr. Pred.": ("iskn1vp6", "xsvl0zop"),
         "Deep Ens.": ("1nz1l6qj", "ymq2jv64"),
-        "Laplace": ("oyvykqse", "7kksw6rj"),
+        "Laplace": ("0qpln50b", "7kksw6rj"),
         "Mahalanobis": ("mp53zl2m", "swr2k8kf"),
-        "DDU": ("pwpq7bo6", "f87otin9"),
+        "DDU": ("5exmovzc", "oj31fxin"),
         "Temperature": ("yxvvtw51", "n85ctsck"),
     }
 
@@ -55,8 +55,8 @@ def main():
         log_prob_score_hard_bma_correctness="Log Prob.",
         brier_score_hard_bma_correctness="Brier",
         rank_correlation_bregman_au="Aleatoric",
-        ece_hard_bma_correctness="-ECE (*)",
-        auroc_oodness="OOD (*)",
+        ece_hard_bma_correctness="-ECE",
+        auroc_oodness="OOD",
         hard_bma_accuracy="Accuracy",
     )
 
@@ -89,7 +89,7 @@ def main():
                     [performance_matrix_imagenet, performance_matrix_cifar],
                     [mixture_prefix_imagenet, mixture_prefix_cifar],
                 ):
-                    prefix = id_prefix if metric_name != "OOD (*)" else prefix
+                    prefix = id_prefix if metric_name != "OOD" else prefix
                     estimator_dict = {}
                     for run in sweep.runs:
                         for key in sorted(run.summary.keys()):
@@ -114,7 +114,7 @@ def main():
                                         run.summary[key]
                                     )
 
-                                if metric_name == "-ECE (*)":
+                                if metric_name == "-ECE":
                                     estimator_dict[stripped_key][-1] *= -1
 
                     for key in tuple(estimator_dict.keys()):
