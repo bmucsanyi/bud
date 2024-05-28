@@ -241,11 +241,11 @@ class SoftImageNet(ImageNet):
         converted_index = self.filepath_to_softid[
             os.path.split(self.samples[index][0])[-1]
         ]
-        target = self.soft_labels[converted_index, :]
-        augmented_target = np.concatenate([target, [original_target]])
+        soft_target = self.soft_labels[converted_index, :]
+        augmented_target = np.concatenate([soft_target, [original_target]])
 
         if self.target_transform is not None:
-            target = self.target_transform(target)
+            augmented_target = self.target_transform(augmented_target)
 
         return img, augmented_target
 

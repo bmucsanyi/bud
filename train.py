@@ -1878,7 +1878,7 @@ def main():
     )
 
     def hard_target_transform(target):
-        if isinstance(target, np.ndarray):  # Soft dataset
+        if isinstance(target, (np.ndarray, torch.Tensor)):  # Soft dataset
             return target[-1]  # Last entry contains hard label
 
         return target
