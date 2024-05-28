@@ -126,9 +126,6 @@ class LaplaceWrapper(PosteriorWrapper):
         self.laplace_model.prior_precision = self.gridsearch(
             interval=interval,
             val_loader=val_loader,
-            pred_type=self.pred_type,
-            link_approx=self.link_approx,
-            n_samples=self.num_mc_samples_cv,
         )
 
         print(f"Optimized prior precision is {self.laplace_model.prior_precision}.")
@@ -137,12 +134,9 @@ class LaplaceWrapper(PosteriorWrapper):
         self,
         interval,
         val_loader,
-        pred_type,
-        link_approx="probit",
-        n_samples=100,
     ):
-        results = list()
-        prior_precs = list()
+        results = []
+        prior_precs = []
         for prior_prec in interval:
             print(f"Trying {prior_prec}...")
             start_time = time.perf_counter()
@@ -150,9 +144,9 @@ class LaplaceWrapper(PosteriorWrapper):
             try:
                 out_dist, targets = self.validate(
                     val_loader=val_loader,
-                    pred_type=pred_type,
-                    link_approx=link_approx,
-                    n_samples=n_samples,
+                    pred_type=self.pred_type,
+                    link_approx=self.link_approx,
+                    n_samples=self.num_mc_samples_cv,
                 )
                 result = self.get_nll(out_dist, targets).item()
             except RuntimeError as error:
@@ -168,8 +162,8 @@ class LaplaceWrapper(PosteriorWrapper):
         self, val_loader, pred_type="glm", link_approx="probit", n_samples=100
     ):
         self.laplace_model.model.eval()
-        output_means = list()
-        targets = list()
+        output_means = []
+        targets = []
         for X, y in val_loader:
             X, y = X.to(self.laplace_model._device), y.to(self.laplace_model._device)
             out = self.laplace_model(
