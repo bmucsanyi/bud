@@ -203,12 +203,12 @@ class PostNetWrapper(DirichletWrapper):
         super().__init__(model)
 
         # TODO: come back to check if these are needed/useful
-        self.register_buffer("sample_count_per_class", None)
         self.latent_dim = latent_dim
         self.num_features = latent_dim  # For compatibility
         self.hidden_dim = hidden_dim
         self.num_density_components = num_density_components
         self.num_classes = model.num_classes
+        self.register_buffer("sample_count_per_class", torch.zeros(self.num_classes))
 
         # Use wrapped model as a feature extractor
         self.model.reset_classifier(num_classes=latent_dim)
@@ -239,7 +239,7 @@ class PostNetWrapper(DirichletWrapper):
 
     def calculate_sample_counts(self, train_loader):
         device = next(self.model.parameters()).device
-        sample_count_per_class = torch.zeros((self.num_classes))
+        sample_count_per_class = torch.zeros(self.num_classes)
 
         for _, targets in train_loader:
             targets = targets.cpu()
