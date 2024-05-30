@@ -2531,6 +2531,7 @@ def get_bundle(
                 time_max_prob_of_fbar_m=time_max_prob_of_fbar_m,
                 time_expected_divergence_m=time_expected_divergence_m,
                 time_jsd_m=time_jsd_m,
+                time_dempster_shafer_value_m=time_dempster_shafer_value_m,
                 expected_entropies=expected_entropies,
                 expected_entropies_plus_expected_divergences=expected_entropies_plus_expected_divergences,
                 one_minus_expected_max_probs=one_minus_expected_max_probs,
