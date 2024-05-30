@@ -2460,8 +2460,8 @@ def get_bundle(
         temp_features = torch.empty(num_samples, model.num_models, model.num_features)
         base_time_m = AverageMeter()
 
-        for index in range(model.num_models):
-            model.load_model(index)
+        for model_index in range(model.num_models):
+            model.load_model(model_index)
             model.to(device=device)
             if args.channels_last:
                 model.to(memory_format=torch.channels_last)
@@ -2489,8 +2489,8 @@ def get_bundle(
                 base_time = base_time_end - base_time_start
                 base_time_m.update(base_time, batch_size)
 
-                temp_logits[indices, index, :] = inference_dict["logit"]
-                temp_features[indices, index, :] = inference_dict["feature"]
+                temp_logits[indices, model_index, :] = inference_dict["logit"]
+                temp_features[indices, model_index, :] = inference_dict["feature"]
 
                 current_ind += batch_size
 
@@ -2577,12 +2577,12 @@ def get_bundle(
                         + gt_biases_bregman_bma[indices]
                         + gt_epistemics_bregman[indices]
                     )
-                    gt_hard_labels_original = hard_label.cpu()
                     gt_soft_labels[indices] = prob
+                    gt_hard_labels_original[indices] = hard_label.cpu()
                     gt_hard_labels[indices] = prob.argmax(dim=1)
                 else:
-                    gt_hard_labels_original[indices] = label
                     label = label.cpu()
+                    gt_hard_labels_original[indices] = label
                     gt_hard_labels[indices] = label
 
                     gt_predictives_bregman_fbar[indices] = F.cross_entropy(
