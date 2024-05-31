@@ -143,6 +143,8 @@ def evaluate(
     is_soft_labels = len(label_shape) == 2
     is_test = "eval" not in key_prefix
 
+    # TODO: redesign get_bundle s.t. only the eval_metric's ingredients are collected
+    # when doing eval
     estimates, log_probs, targets, times = get_bundle(
         model=model,
         loader=loader,
@@ -155,17 +157,24 @@ def evaluate(
 
     metrics = times
 
-    metrics = evaluate_on_tasks(
-        model=model,
-        estimates=estimates,
-        log_probs=log_probs,
-        targets=targets,
-        metrics=metrics,
-        is_same_task=is_same_task,
-        is_soft_labels=is_soft_labels,
-        is_test=is_test,
-        args=args,
-    )
+    if is_test:
+        metrics = evaluate_on_tasks(
+            model=model,
+            estimates=estimates,
+            log_probs=log_probs,
+            targets=targets,
+            metrics=metrics,
+            is_same_task=is_same_task,
+            is_soft_labels=is_soft_labels,
+            args=args,
+        )
+    else:
+        metrics = evaluate_on_auroc_hard_bma_correctness(
+            estimates=estimates,
+            targets=targets,
+            metrics=metrics,
+            args=args,
+        )
 
     if is_upstream and is_test:
         # Save ingredients to disk
@@ -341,7 +350,6 @@ def evaluate(
             metrics=metrics,
             is_same_task=is_same_task,
             is_soft_labels=is_soft_labels,
-            is_test=is_test,
             args=args,
             upstream_is_soft_labels=upstream_is_soft_labels,
         )
@@ -386,6 +394,25 @@ def concatenate_values(upstream_dict, downstream_dict, keys_to_exclude=None):
 
     return result
 
+def evaluate_on_auroc_hard_bma_correctness(
+    estimates,
+    targets,
+    metrics,
+    args,
+):
+    for estimator_name in estimates:
+        if estimator_name in args.eval_metric:
+            estimate = -estimates[estimator_name]
+
+            gt_hard_bma_correctnesses = targets["gt_hard_bma_correctnesses"]
+            metrics[
+                f"{estimator_name}_auroc_hard_bma_correctness"
+            ] = calculate_auroc(
+                estimate, gt_hard_bma_correctnesses, args, soft=False
+            ).item()
+
+            return metrics
+
 
 def evaluate_on_tasks(
     model,
@@ -395,11 +422,9 @@ def evaluate_on_tasks(
     metrics,
     is_same_task,
     is_soft_labels,
-    is_test,
     args,
     upstream_is_soft_labels=None,
 ):
-    is_mixed = upstream_is_soft_labels is not None
 
     metrics |= evaluate_on_correctness_of_prediction(
         model=model,
@@ -410,11 +435,29 @@ def evaluate_on_tasks(
         args=args,
         upstream_is_soft_labels=upstream_is_soft_labels,
     )
+    metrics |= evaluate_on_abstained_prediction(
+        model=model,
+        estimates=estimates,
+        targets=targets,
+        is_same_task=is_same_task,
+        is_soft_labels=is_soft_labels,
+        args=args,
+        upstream_is_soft_labels=upstream_is_soft_labels,
+    )
 
-    if is_test:
-        metrics |= evaluate_on_abstained_prediction(
+    is_mixed = upstream_is_soft_labels is not None
+    if is_mixed:
+        metrics |= evaluate_on_ood_detection(
+            estimates=estimates,
+            targets=targets,
+            args=args,
+        )
+
+    if not isinstance(model, MCInfoNCEWrapper):
+        metrics |= evaluate_on_proper_scoring_and_calibration(
             model=model,
             estimates=estimates,
+            log_probs=log_probs,
             targets=targets,
             is_same_task=is_same_task,
             is_soft_labels=is_soft_labels,
@@ -422,48 +465,29 @@ def evaluate_on_tasks(
             upstream_is_soft_labels=upstream_is_soft_labels,
         )
 
-        if is_mixed:
-            metrics |= evaluate_on_ood_detection(
-                estimates=estimates,
-                targets=targets,
-                args=args,
-            )
-
-        if not isinstance(model, MCInfoNCEWrapper):
-            metrics |= evaluate_on_proper_scoring_and_calibration(
-                model=model,
-                estimates=estimates,
-                log_probs=log_probs,
-                targets=targets,
-                is_same_task=is_same_task,
-                is_soft_labels=is_soft_labels,
-                args=args,
-                upstream_is_soft_labels=upstream_is_soft_labels,
-            )
-
-        metrics |= evaluate_on_bregman(
-            model=model,
-            estimates=estimates,
-            targets=targets,
-            is_same_task=is_same_task,
-            is_soft_labels=is_soft_labels,
-            args=args,
-            upstream_is_soft_labels=upstream_is_soft_labels,
-        )
-        metrics |= evaluate_on_correlation_of_estimators(
-            estimates=estimates,
-            args=args,
-            upstream_is_soft_labels=upstream_is_soft_labels,
-        )
-        metrics |= evaluate_on_correlation_of_decompositions(
-            model=model,
-            estimates=estimates,
-            targets=targets,
-            is_same_task=is_same_task,
-            is_soft_labels=is_soft_labels,
-            args=args,
-            upstream_is_soft_labels=upstream_is_soft_labels,
-        )
+    metrics |= evaluate_on_bregman(
+        model=model,
+        estimates=estimates,
+        targets=targets,
+        is_same_task=is_same_task,
+        is_soft_labels=is_soft_labels,
+        args=args,
+        upstream_is_soft_labels=upstream_is_soft_labels,
+    )
+    metrics |= evaluate_on_correlation_of_estimators(
+        estimates=estimates,
+        args=args,
+        upstream_is_soft_labels=upstream_is_soft_labels,
+    )
+    metrics |= evaluate_on_correlation_of_decompositions(
+        model=model,
+        estimates=estimates,
+        targets=targets,
+        is_same_task=is_same_task,
+        is_soft_labels=is_soft_labels,
+        args=args,
+        upstream_is_soft_labels=upstream_is_soft_labels,
+    )
 
     return metrics
 

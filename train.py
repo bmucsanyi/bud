@@ -2216,6 +2216,9 @@ def main():
 
     # Setup checkpoint saver and eval metric tracking
     eval_metric = args.eval_metric
+
+    assert eval_metric.startswith("id_eval_") and eval_metric.endswith("_auroc_hard_bma_correctness")
+
     best_metric = None
     best_eval_metric = float("inf") if args.decreasing else -float("inf")
     best_eval_metrics = None
