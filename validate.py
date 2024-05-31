@@ -141,6 +141,7 @@ def evaluate(
 
     label_shape = next(iter(loader))[1].shape
     is_soft_labels = len(label_shape) == 2
+    is_test = "eval" not in key_prefix
 
     estimates, log_probs, targets, times = get_bundle(
         model=model,
@@ -162,10 +163,11 @@ def evaluate(
         metrics=metrics,
         is_same_task=is_same_task,
         is_soft_labels=is_soft_labels,
+        is_test=is_test,
         args=args,
     )
 
-    if is_upstream:
+    if is_upstream and is_test:
         # Save ingredients to disk
         max_num_indices = len(targets["gt_zero_shot_correctnesses"])
         num_indices = min(max_num_indices, args.max_num_id_ood_eval_samples // 2)
@@ -186,7 +188,7 @@ def evaluate(
             upstream_dict["upstream_log_probs"] = filter_entries(log_probs, indices)
 
         torch.save(upstream_dict, f"{temp_folder}/upstream_dict.pt")
-    else:
+    elif is_test:
         # Load ingredients from disk
         upstream_dict = torch.load(f"{temp_folder}/upstream_dict.pt")
         upstream_estimates = upstream_dict["upstream_estimates"]
@@ -339,6 +341,7 @@ def evaluate(
             metrics=metrics,
             is_same_task=is_same_task,
             is_soft_labels=is_soft_labels,
+            is_test=is_test,
             args=args,
             upstream_is_soft_labels=upstream_is_soft_labels,
         )
@@ -392,6 +395,7 @@ def evaluate_on_tasks(
     metrics,
     is_same_task,
     is_soft_labels,
+    is_test,
     args,
     upstream_is_soft_labels=None,
 ):
@@ -407,28 +411,10 @@ def evaluate_on_tasks(
         upstream_is_soft_labels=upstream_is_soft_labels,
     )
 
-    metrics |= evaluate_on_abstained_prediction(
-        model=model,
-        estimates=estimates,
-        targets=targets,
-        is_same_task=is_same_task,
-        is_soft_labels=is_soft_labels,
-        args=args,
-        upstream_is_soft_labels=upstream_is_soft_labels,
-    )
-
-    if is_mixed:
-        metrics |= evaluate_on_ood_detection(
-            estimates=estimates,
-            targets=targets,
-            args=args,
-        )
-
-    if not isinstance(model, MCInfoNCEWrapper):
-        metrics |= evaluate_on_proper_scoring_and_calibration(
+    if is_test:
+        metrics |= evaluate_on_abstained_prediction(
             model=model,
             estimates=estimates,
-            log_probs=log_probs,
             targets=targets,
             is_same_task=is_same_task,
             is_soft_labels=is_soft_labels,
@@ -436,29 +422,48 @@ def evaluate_on_tasks(
             upstream_is_soft_labels=upstream_is_soft_labels,
         )
 
-    metrics |= evaluate_on_bregman(
-        model=model,
-        estimates=estimates,
-        targets=targets,
-        is_same_task=is_same_task,
-        is_soft_labels=is_soft_labels,
-        args=args,
-        upstream_is_soft_labels=upstream_is_soft_labels,
-    )
-    metrics |= evaluate_on_correlation_of_estimators(
-        estimates=estimates,
-        args=args,
-        upstream_is_soft_labels=upstream_is_soft_labels,
-    )
-    metrics |= evaluate_on_correlation_of_decompositions(
-        model=model,
-        estimates=estimates,
-        targets=targets,
-        is_same_task=is_same_task,
-        is_soft_labels=is_soft_labels,
-        args=args,
-        upstream_is_soft_labels=upstream_is_soft_labels,
-    )
+        if is_mixed:
+            metrics |= evaluate_on_ood_detection(
+                estimates=estimates,
+                targets=targets,
+                args=args,
+            )
+
+        if not isinstance(model, MCInfoNCEWrapper):
+            metrics |= evaluate_on_proper_scoring_and_calibration(
+                model=model,
+                estimates=estimates,
+                log_probs=log_probs,
+                targets=targets,
+                is_same_task=is_same_task,
+                is_soft_labels=is_soft_labels,
+                args=args,
+                upstream_is_soft_labels=upstream_is_soft_labels,
+            )
+
+        metrics |= evaluate_on_bregman(
+            model=model,
+            estimates=estimates,
+            targets=targets,
+            is_same_task=is_same_task,
+            is_soft_labels=is_soft_labels,
+            args=args,
+            upstream_is_soft_labels=upstream_is_soft_labels,
+        )
+        metrics |= evaluate_on_correlation_of_estimators(
+            estimates=estimates,
+            args=args,
+            upstream_is_soft_labels=upstream_is_soft_labels,
+        )
+        metrics |= evaluate_on_correlation_of_decompositions(
+            model=model,
+            estimates=estimates,
+            targets=targets,
+            is_same_task=is_same_task,
+            is_soft_labels=is_soft_labels,
+            args=args,
+            upstream_is_soft_labels=upstream_is_soft_labels,
+        )
 
     return metrics
 
