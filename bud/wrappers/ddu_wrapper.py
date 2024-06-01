@@ -20,7 +20,7 @@ from bud.wrappers.sngp_wrapper import (
 
 
 DOUBLE_INFO = torch.finfo(torch.double)
-JITTERS = [0, DOUBLE_INFO.tiny] + [10**exp for exp in range(-308, 0, 1)]
+JITTERS = [10**exp for exp in range(-25, 0, 1)]
 
 
 class DDUWrapper(TemperatureWrapper):
