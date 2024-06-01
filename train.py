@@ -2313,9 +2313,39 @@ def main():
                     loss_scaler=loss_scaler,
                     mixup_fn=mixup_fn,
                 )
+
+                eval_metrics = evaluate(
+                    model=model,
+                    loader=loader_id_eval,
+                    device=device,
+                    amp_autocast=amp_autocast,
+                    key_prefix="id_eval",
+                    temp_folder=output_dir,
+                    is_same_task=True,
+                    is_upstream=True,
+                    args=args,
+                )
+
+                logger.info(f"{eval_metric}: {eval_metrics[eval_metric]}")
+
+                is_new_best = (args.lr == 0 and epoch == 0) or (
+                    epoch >= args.best_save_start_epoch
+                    and (
+                        (decreasing and eval_metrics[eval_metric] < best_eval_metric)
+                        or (
+                            (not decreasing)
+                            and eval_metrics[eval_metric] > best_eval_metric
+                        )
+                    )
+                )
+
+                if is_new_best:
+                    best_eval_metric = eval_metrics[eval_metric]
+                    best_eval_metrics = eval_metrics
             elif args.lr == 0 and epoch == 0:  # Post-hoc method
                 logger.info("Learning rate is 0, skipping training epoch.")
                 train_metrics = None
+                eval_metrics = None
             elif args.lr > 0 and epoch == num_epochs and args.is_evaluate_on_test_sets:
                 best_save_path = os.path.join(
                     saver.checkpoint_dir, "model_best" + saver.extension
@@ -2323,6 +2353,8 @@ def main():
                 checkpoint = torch.load(best_save_path, map_location="cpu")
                 state_dict = checkpoint["state_dict"]
                 model.load_state_dict(state_dict, strict=True)
+                train_metrics = None
+                eval_metrics = None
             else:
                 break
 
@@ -2331,7 +2363,9 @@ def main():
                     logger.info("Distributing BatchNorm running means and vars")
                 utils.distribute_bn(model, args.world_size, args.dist_bn == "reduce")
 
-            if args.ood_transforms_eval:
+            if args.is_evaluate_on_test_sets and (
+                (args.lr > 0 and epoch == num_epochs) or (args.lr == 0 and epoch == 0)
+            ):
                 update_post_hoc_method(
                     model,
                     loader_train,
@@ -2340,38 +2374,6 @@ def main():
                     args,
                 )
 
-            eval_metrics = evaluate(
-                model=model,
-                loader=loader_id_eval,
-                device=device,
-                amp_autocast=amp_autocast,
-                key_prefix="id_eval",
-                temp_folder=output_dir,
-                is_same_task=True,
-                is_upstream=True,
-                args=args,
-            )
-
-            logger.info(f"{eval_metric}: {eval_metrics[eval_metric]}")
-
-            is_new_best = (args.lr == 0 and epoch == 0) or (
-                epoch >= args.best_save_start_epoch
-                and (
-                    (decreasing and eval_metrics[eval_metric] < best_eval_metric)
-                    or (
-                        (not decreasing)
-                        and eval_metrics[eval_metric] > best_eval_metric
-                    )
-                )
-            )
-
-            if is_new_best:
-                best_eval_metric = eval_metrics[eval_metric]
-                best_eval_metrics = eval_metrics
-
-            if args.is_evaluate_on_test_sets and (
-                (args.lr > 0 and epoch == num_epochs) or (args.lr == 0 and epoch == 0)
-            ):
                 model.eval()
 
                 if isinstance(model, DDUWrapper):
@@ -2443,8 +2445,7 @@ def main():
 
             if (
                 saver is not None
-                and epoch < num_epochs
-                and epoch >= args.best_save_start_epoch
+                and eval_metrics is not None
             ):
                 # Save proper checkpoint with eval metric
                 save_metric = eval_metrics[eval_metric]
@@ -2452,7 +2453,7 @@ def main():
                     epoch, metric=save_metric
                 )
 
-            if lr_scheduler is not None and num_epochs > 1:
+            if lr_scheduler is not None and eval_metrics is not None:
                 # Step LR for next epoch
                 lr_scheduler.step(epoch + 1, eval_metrics[eval_metric])
 
