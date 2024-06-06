@@ -44,7 +44,6 @@ class HETXLHead(nn.Module):
             F.softplus(self.diagonal_std_layer(features)) + self.min_scale_monte_carlo
         )  # [B, D]
 
-        # TODO: https://github.com/google/edward2/blob/main/edward2/jax/nn/heteroscedastic_lib.py#L189
         diagonal_samples = diagonal_std.unsqueeze(1) * torch.randn(
             B, S, D, device=features.device
         )  # [B, S, D]
@@ -62,8 +61,6 @@ class HETXLHead(nn.Module):
             logits = pre_logits
 
         logits_temperature = logits / self.temperature
-
-        # TODO: https://github.com/google/edward2/blob/main/edward2/jax/nn/heteroscedastic_lib.py#L325
 
         return logits_temperature
 

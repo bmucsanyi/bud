@@ -1,3 +1,4 @@
+"""PostNet (re)implementation based on https://github.com/sharpenb/Posterior-Network."""
 import torch
 from pyro.distributions.transforms.radial import Radial
 from torch import nn
@@ -202,7 +203,6 @@ class PostNetWrapper(DirichletWrapper):
     ):
         super().__init__(model)
 
-        # TODO: come back to check if these are needed/useful
         self.latent_dim = latent_dim
         self.num_features = latent_dim  # For compatibility
         self.hidden_dim = hidden_dim

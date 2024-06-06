@@ -697,8 +697,6 @@ class Conv2dSpectralNormalizer(nn.Module):
 
         return super()._replicate_for_data_parallel()
 
-    # TODO: add dummy fw pass if data parallel needed; add it in later release
-
     @torch.no_grad()
     def _power_method(
         self, weight: torch.Tensor, spectral_normalization_iteration: int
@@ -739,7 +737,6 @@ class Conv2dSpectralNormalizer(nn.Module):
             # where u and v are the first left and right (unit) singular vectors,
             # respectively. This power iteration produces approximations of u and v.
 
-            # TODO: possibly get rid of "same" padding?
             v_shaped = F.conv_transpose2d(
                 input=self._u.view(self.single_output_shape),
                 weight=weight,
@@ -904,7 +901,6 @@ class _SpectralNormalizedBatchNorm(_NormBase):
 
 class SpectralNormalizedBatchNorm2d(_SpectralNormalizedBatchNorm):
     def __init__(self, module, spectral_normalization_bound: float) -> None:
-        # TODO: set bn-momentum to 0.01 if we use this!
         super().__init__(
             module.num_features,
             spectral_normalization_bound,
@@ -928,7 +924,7 @@ class SNGPWrapper(PosteriorWrapper):
         self,
         model: nn.Module,
         is_spectral_normalized: bool,
-        use_tight_norm_for_pointwise_convs: bool,  # TODO: read up on the paper again
+        use_tight_norm_for_pointwise_convs: bool,
         spectral_normalization_iteration: int,
         spectral_normalization_bound: float,
         is_batch_norm_spectral_normalized: bool,

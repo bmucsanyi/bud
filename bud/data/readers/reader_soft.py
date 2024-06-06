@@ -1,7 +1,7 @@
 """This file contains utils and a dataloader to load the downstream datasets
 of the "Is One Annotation Enough?" paper
 
-Hacked together by / Copyright 2023 Michael Kirchhof
+Hacked together by / Copyright 2023 Anonymous Author
                            and 2024 Anonymous Author
 """
 

@@ -143,8 +143,6 @@ def evaluate(
     is_soft_labels = len(label_shape) == 2
     is_test = "eval" not in key_prefix
 
-    # TODO: redesign get_bundle s.t. only the eval_metric's ingredients are collected
-    # when doing eval
     estimates, log_probs, targets, times = get_bundle(
         model=model,
         loader=loader,
