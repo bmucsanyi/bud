@@ -14,7 +14,7 @@ NVIDIA CUDA specific speedups adopted from NVIDIA Apex examples
 (https://github.com/NVIDIA/apex/tree/master/examples/imagenet)
 
 Hacked together by / Copyright 2020 Ross Wightman (https://github.com/rwightman)
-                           and 2024 Bálint Mucsányi (https://github.com/bmucsanyi)
+                           and 2024 Anonymous Author
 """
 
 import argparse

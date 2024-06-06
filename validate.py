@@ -7,7 +7,7 @@ organized image datasets. It prioritizes canonical PyTorch, standard Python styl
 good performance. Repurpose as you see fit.
 
 Hacked together by / Copyright 2020 Ross Wightman (https://github.com/rwightman)
-                           and 2024 Bálint Mucsányi (https://github.com/bmucsanyi)
+                           and 2024 Anonymous Author
 """
 
 import os

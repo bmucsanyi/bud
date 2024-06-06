@@ -8,7 +8,7 @@ ResNeXt, SE-ResNeXt, SENet, and MXNet Gluon stem/downsample variants, tiered ste
 CIFAR ResNet variants implemented based on https://github.com/google/uncertainty-baselines
 
 Copyright 2019 Ross Wightman
-      and 2024 Bálint Mucsányi
+      and 2024 Anonymous Author
 """
 
 import math
