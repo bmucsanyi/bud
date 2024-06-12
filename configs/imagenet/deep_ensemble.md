@@ -1,0 +1,57 @@
+# Deep Ensemble Hyperparameters
+
+- accumulation-steps: 16
+- amp-dtype: float16
+- batch-size: 128
+- color-jitter: 0
+- crop-pct: 0.875
+- data-dir: <DATA_DIR>
+- dataset: torch/imagenet
+- dataset-id: soft/imagenet
+- epochs: 1
+- eval-metric: id_eval_one_minus_max_probs_of_bma_auroc_hard_bma_correctness
+- img-size: 224
+- loss: cross-entropy
+- lr-base: 0
+- mean: 
+  - 0.485
+  - 0.456
+  - 0.406
+- method: deep-ensemble
+- model: resnet50
+- momentum: 0.9
+- num-classes: 1000
+- ood-transforms-eval: 
+  - gaussian_noise
+  - shot_noise
+  - impulse_noise
+  - defocus_blur
+  - frosted_glass_blur
+  - motion_blur
+  - zoom_blur
+  - snow
+  - frost
+  - fog
+  - brightness
+  - contrast
+  - elastic
+  - pixelate
+  - jpeg
+- opt: adamw
+- sched: cosine
+- smoothing: 0
+- soft-imagenet-label-dir: <SOFT_IMAGENET_LABEL_DIR>
+- std: 
+  - 0.229
+  - 0.224
+  - 0.225
+- test-split: validation
+- warmup-epochs: 0
+- warmup-lr: 0
+- weight-decay: 0.001
+- weight-paths: 
+  - <PATH_TO_NETWORK_1>
+  - <PATH_TO_NETWORK_2>
+  - <PATH_TO_NETWORK_3>
+  - <PATH_TO_NETWORK_4>
+  - <PATH_TO_NETWORK_5>

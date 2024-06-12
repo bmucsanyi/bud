@@ -1,0 +1,55 @@
+# Mahalanobis Hyperparameters
+
+- accumulation-steps: 32
+- amp-dtype: float16
+- batch-size: 64
+- color-jitter: 0
+- crop-pct: 0.875
+- data-dir: <DATA_DIR>
+- dataset: torch/imagenet
+- dataset-id: soft/imagenet
+- epochs: 1
+- eval-metric: id_eval_mahalanobis_values_auroc_hard_bma_correctness
+- img-size: 224
+- loss: cross-entropy
+- lr-base: 0
+- magnitude: 0.001
+- mean: 
+  - 0.485
+  - 0.456
+  - 0.406
+- method: mahalanobis
+- model: resnet50
+- module-name-regex: ^(layer[1-4])$
+- momentum: 0.9
+- num-classes: 1000
+- ood-transforms-eval: 
+  - gaussian_noise
+  - shot_noise
+  - impulse_noise
+  - defocus_blur
+  - frosted_glass_blur
+  - motion_blur
+  - zoom_blur
+  - snow
+  - frost
+  - fog
+  - brightness
+  - contrast
+  - elastic
+  - pixelate
+  - jpeg
+- opt: adamw
+- sched: cosine
+- seed: 42
+- smoothing: 0
+- soft-imagenet-label-dir: <SOFT_IMAGENET_LABEL_DIR>
+- std: 
+  - 0.229
+  - 0.224
+  - 0.225
+- test-split: validation
+- warmup-epochs: 0
+- warmup-lr: 0
+- weight-decay: 0.001
+- weight-paths: <PATH_TO_NETWORK>

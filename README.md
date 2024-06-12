@@ -35,6 +35,10 @@ The ImageNet-ReaL labels (Apache License) are available in [this GitHub reposito
 ## Reproducing Results
 
 We provide scripts that reproduce our results.
-These are found in the `scripts` folder for both ImageNet and CIFAR-10 and are named after the respective method.
+These are found in the `scripts` folder for both ImageNet and CIFAR-10 and are named after the respective method. The dataset paths and the weight paths for post-hoc methods must be modified appropriately.
 
 To recreate the plots used in the paper, we will release all code after the anonymity period.
+
+## Hyperparameters
+
+The hyperparameters used in our experiments are listed in the `configs` folder in Markdown format. These match the ones used in the `scripts` folder but are displayed in a more convenient layout.

@@ -1,0 +1,55 @@
+# Correctness Prediction Hyperparameters
+
+- accumulation-steps: 16
+- amp-dtype: float16
+- batch-size: 128
+- color-jitter: 0
+- crop-pct: 0.875
+- data-dir: <DATA_DIR>
+- dataset: torch/imagenet
+- dataset-id: soft/imagenet
+- epochs: 50
+- eval-metric: id_eval_error_probabilities_auroc_hard_bma_correctness
+- img-size: 224
+- lambda-uncertainty-loss: 0.06672276229383677
+- loss: correctness-prediction
+- lr-base: 0.00028993726542489494
+- mean: 
+  - 0.485
+  - 0.456
+  - 0.406
+- method: correctness-prediction
+- mlp-depth: 3
+- model: resnet50
+- momentum: 0.9
+- num-classes: 1000
+- num-hidden-features: 1024
+- ood-transforms-eval: 
+  - gaussian_noise
+  - shot_noise
+  - impulse_noise
+  - defocus_blur
+  - frosted_glass_blur
+  - motion_blur
+  - zoom_blur
+  - snow
+  - frost
+  - fog
+  - brightness
+  - contrast
+  - elastic
+  - pixelate
+  - jpeg
+- opt: adamw
+- sched: cosine
+- seed: 0
+- smoothing: 0
+- soft-imagenet-label-dir: <SOFT_IMAGENET_LABEL_DIR>
+- std: 
+  - 0.229
+  - 0.224
+  - 0.225
+- test-split: validation
+- warmup-epochs: 5
+- warmup-lr: 1e-05
+- weight-decay: 2.5198824582642475e-06
