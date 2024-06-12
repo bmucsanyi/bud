@@ -2,7 +2,7 @@
 name = "bud"
 version = "0.1.0"
 description = ""
-authors = ["Balint Mucsanyi <b.h.mucsanyi@gmail.com>"]
+authors = ["Anonymous Author <anonymous.author@gmail.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
