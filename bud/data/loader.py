@@ -7,7 +7,6 @@ Hacked together by / Copyright 2019 Ross Wightman
                            and 2024 Bálint Mucsányi
 """
 import logging
-import os
 import random
 from contextlib import suppress
 from functools import partial
@@ -142,6 +141,7 @@ class PrefetchLoader:
 
         self.loader = loader
         self.device = device
+
         if fp16:
             # fp16 arg is deprecated, but will override dtype arg if set for bwd compat
             img_dtype = torch.float16
@@ -184,7 +184,7 @@ class PrefetchLoader:
                     next_input = self.random_erasing(next_input)
 
             if not first:
-                yield input, target
+                yield input, target  # noqa
             else:
                 first = False
 
@@ -206,6 +206,14 @@ class PrefetchLoader:
     @property
     def dataset(self):
         return self.loader.dataset
+
+    @property
+    def batch_size(self):
+        return self.loader.batch_size
+
+    @property
+    def drop_last(self):
+        return self.loader.drop_last
 
     @property
     def mixup_enabled(self):
@@ -379,7 +387,7 @@ def create_loader(
     )
     try:
         loader = loader_class(dataset, **loader_args)
-    except TypeError as e:
+    except TypeError:
         loader_args.pop("persistent_workers")  # only in Pytorch 1.7+
         loader = loader_class(dataset, **loader_args)
     if use_prefetcher:

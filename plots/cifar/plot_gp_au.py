@@ -13,20 +13,19 @@ sys.path.insert(0, "..")
 from utils import (
     POSTERIOR_ESTIMATORS,
     GT_LABELS,
-    ID_TO_METHOD_IMAGENET,
-    DATASET_CONVERSION_DICT_IMAGENET,
+    ID_TO_METHOD_CIFAR,
+    DATASET_CONVERSION_DICT_CIFAR,
     ESTIMATOR_CONVERSION_DICT,
     create_directory,
 )
 
 from tueplots import bundles
-
-plt.rcParams.update(
-    bundles.icml2022(family="serif", usetex=True, nrows=1, column="half")
-)
-
 from matplotlib.ticker import MultipleLocator
 
+config = bundles.icml2024(family="serif", column="half", usetex=True)
+config["figure.figsize"] = (3.25, 0.98)
+
+plt.rcParams.update(config)
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
 
 
@@ -176,7 +175,7 @@ def plot_and_save_aggregated(
         else:
             bar.set_color(np.array([251.0, 188.0, 4.0]) / 255.0)
 
-        if processed_label == "Baseline":
+        if processed_label == "CE Baseline":
             bar.set_color(np.array([154.0, 160.0, 166.0]) / 255.0)
 
     # for i, (_, value) in enumerate(zip(bars, best_values)):
@@ -222,14 +221,14 @@ def main(args):
             return x
         return abs(x)
 
-    for prefix in DATASET_CONVERSION_DICT_IMAGENET:
+    for prefix in DATASET_CONVERSION_DICT_CIFAR:
         create_directory("results")
-        create_directory(f"results/laplace_au")
-        create_directory(f"results/laplace_au/{prefix.replace('/', '-')}")
+        create_directory("results/gp_au")
+        create_directory(f"results/gp_au/{prefix.replace('/', '-')}")
         aggregated_estimators = {}
         aggregated_estimators_mins_maxs = {}
 
-        for method_id, method_name in tqdm(ID_TO_METHOD_IMAGENET.items()):
+        for method_id, method_name in tqdm(ID_TO_METHOD_CIFAR.items()):
             sweep = api.sweep(f"bmucsanyi/bias/{method_id}")
 
             metric = {}
@@ -260,7 +259,7 @@ def main(args):
                             )
 
             save_path = (
-                f"results/laplace_au/{prefix.replace('/', '-')}/"
+                f"results/gp_au/{prefix.replace('/', '-')}/"
                 f"{method_name.replace('.', '').replace(' ', '_')}.pdf"
             )
             metric = {key: value for key, value in metric.items() if "NaN" not in value}
@@ -309,7 +308,7 @@ def main(args):
 
         # Save the aggregated plot with min-max error bars
         aggregated_save_path = (
-            f"results/laplace_au/{prefix.replace('/', '-')}/aggregated.pdf"
+            f"results/gp_au/{prefix.replace('/', '-')}/aggregated.pdf"
         )
         plot_and_save_aggregated(
             "Rank Correlation",

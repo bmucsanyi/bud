@@ -2,8 +2,6 @@ import os
 from typing import Any, Dict, Optional, Union
 from urllib.parse import urlsplit
 
-from torch import nn
-
 from bud.layers import set_layer_config
 from bud.wrappers import (
     CorrectnessPredictionWrapper,
@@ -23,6 +21,8 @@ from bud.wrappers import (
     LossPredictionWrapper,
     ShallowEnsembleWrapper,
     SNGPWrapper,
+    EDLWrapper,
+    PostNetWrapper,
 )
 
 from ._helpers import load_checkpoint
@@ -38,6 +38,7 @@ VALID_WRAPPERS = [
     "deterministic",
     "dropout",
     "duq",
+    "ddu",
     "het-xl",
     "laplace",
     "mahalanobis",
@@ -89,21 +90,25 @@ def create_model(
     dropout_probability,
     is_filterwise_dropout,
     num_mc_samples,
+    num_mc_samples_cv,
     rbf_length_scale,
     ema_momentum,
     matrix_rank,
+    is_het,
     temperature,
     is_last_layer_laplace,
     pred_type,
     prior_optimization_method,
     hessian_structure,
+    link_approx,
     magnitude,
     initial_average_kappa,
     num_heads,
     is_spectral_normalized,
     spectral_normalization_iteration,
     spectral_normalization_bound,
-    sngp_version,
+    is_batch_norm_spectral_normalized,
+    use_tight_norm_for_pointwise_convs,
     num_random_features,
     gp_kernel_scale,
     gp_output_bias,
@@ -112,6 +117,10 @@ def create_model(
     gp_cov_momentum,
     gp_cov_ridge_penalty,
     gp_input_dim,
+    postnet_latent_dim,
+    postnet_num_density_components,
+    postnet_is_batched,
+    edl_activation,
     use_pretrained,
     checkpoint_path: str,
     pretrained_cfg: Optional[Union[str, Dict[str, Any], PretrainedCfg]] = None,
@@ -222,21 +231,25 @@ def create_model(
         dropout_probability=dropout_probability,
         is_filterwise_dropout=is_filterwise_dropout,
         num_mc_samples=num_mc_samples,
+        num_mc_samples_cv=num_mc_samples_cv,
         rbf_length_scale=rbf_length_scale,
         ema_momentum=ema_momentum,
         matrix_rank=matrix_rank,
+        is_het=is_het,
         temperature=temperature,
         is_last_layer_laplace=is_last_layer_laplace,
         pred_type=pred_type,
         prior_optimization_method=prior_optimization_method,
         hessian_structure=hessian_structure,
+        link_approx=link_approx,
         magnitude=magnitude,
         initial_average_kappa=initial_average_kappa,
         num_heads=num_heads,
         is_spectral_normalized=is_spectral_normalized,
         spectral_normalization_iteration=spectral_normalization_iteration,
         spectral_normalization_bound=spectral_normalization_bound,
-        sngp_version=sngp_version,
+        is_batch_norm_spectral_normalized=is_batch_norm_spectral_normalized,
+        use_tight_norm_for_pointwise_convs=use_tight_norm_for_pointwise_convs,
         num_random_features=num_random_features,
         gp_kernel_scale=gp_kernel_scale,
         gp_output_bias=gp_output_bias,
@@ -245,6 +258,10 @@ def create_model(
         gp_cov_momentum=gp_cov_momentum,
         gp_cov_ridge_penalty=gp_cov_ridge_penalty,
         gp_input_dim=gp_input_dim,
+        postnet_latent_dim=postnet_latent_dim,
+        postnet_num_density_components=postnet_num_density_components,
+        postnet_is_batched=postnet_is_batched,
+        edl_activation=edl_activation,
         use_pretrained=use_pretrained,
         kwargs=kwargs,
     )
@@ -268,21 +285,25 @@ def wrap_model(
     dropout_probability,
     is_filterwise_dropout,
     num_mc_samples,
+    num_mc_samples_cv,
     rbf_length_scale,
     ema_momentum,
     matrix_rank,
+    is_het,
     temperature,
     is_last_layer_laplace,
     pred_type,
     prior_optimization_method,
     hessian_structure,
+    link_approx,
     magnitude,
     initial_average_kappa,
     num_heads,
     is_spectral_normalized,
     spectral_normalization_iteration,
     spectral_normalization_bound,
-    sngp_version,
+    is_batch_norm_spectral_normalized,
+    use_tight_norm_for_pointwise_convs,
     num_random_features,
     gp_kernel_scale,
     gp_output_bias,
@@ -291,6 +312,10 @@ def wrap_model(
     gp_cov_momentum,
     gp_cov_ridge_penalty,
     gp_input_dim,
+    postnet_latent_dim,
+    postnet_num_density_components,
+    postnet_is_batched,
+    edl_activation,
     use_pretrained,
     kwargs,
 ):
@@ -342,6 +367,8 @@ def wrap_model(
             is_spectral_normalized=is_spectral_normalized,
             spectral_normalization_iteration=spectral_normalization_iteration,
             spectral_normalization_bound=spectral_normalization_bound,
+            is_batch_norm_spectral_normalized=is_batch_norm_spectral_normalized,
+            use_tight_norm_for_pointwise_convs=use_tight_norm_for_pointwise_convs,
         )
     elif model_wrapper_name == "het-xl":
         wrapped_model = HETXLWrapper(
@@ -349,16 +376,19 @@ def wrap_model(
             matrix_rank=matrix_rank,
             num_mc_samples=num_mc_samples,
             temperature=temperature,
+            is_het=is_het,
         )
     elif model_wrapper_name == "laplace":
         wrapped_model = LaplaceWrapper(
             model=model,
             num_mc_samples=num_mc_samples,
+            num_mc_samples_cv=num_mc_samples_cv,
             weight_path=weight_paths[0],
             is_last_layer_laplace=is_last_layer_laplace,
             pred_type=pred_type,
             prior_optimization_method=prior_optimization_method,
             hessian_structure=hessian_structure,
+            link_approx=link_approx,
         )
     elif model_wrapper_name == "mahalanobis":
         wrapped_model = MahalanobisWrapper(
@@ -389,6 +419,16 @@ def wrap_model(
             mlp_depth=mlp_depth,
             stopgrad=stopgrad,
         )
+    elif model_wrapper_name == "edl":
+        wrapped_model = EDLWrapper(model=model, activation=edl_activation)
+    elif model_wrapper_name == "postnet":
+        wrapped_model = PostNetWrapper(
+            model=model,
+            latent_dim=postnet_latent_dim,
+            hidden_dim=num_hidden_features,
+            num_density_components=postnet_num_density_components,
+            is_batched=postnet_is_batched,
+        )
     elif model_wrapper_name == "deep-risk-prediction":
         wrapped_model = DeepLossPredictionWrapper(
             model=model,
@@ -405,9 +445,10 @@ def wrap_model(
         wrapped_model = SNGPWrapper(
             model=model,
             is_spectral_normalized=is_spectral_normalized,
+            use_tight_norm_for_pointwise_convs=use_tight_norm_for_pointwise_convs,
             spectral_normalization_iteration=spectral_normalization_iteration,
             spectral_normalization_bound=spectral_normalization_bound,
-            sngp_version=sngp_version,
+            is_batch_norm_spectral_normalized=is_batch_norm_spectral_normalized,
             num_mc_samples=num_mc_samples,
             num_random_features=num_random_features,
             gp_kernel_scale=gp_kernel_scale,

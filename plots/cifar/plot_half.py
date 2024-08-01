@@ -21,15 +21,11 @@ from utils import (
 )
 
 from tueplots import bundles
-
-config = bundles.icml2022(family="serif", usetex=True, nrows=1, column="half")
-config["figure.figsize"] = (3.25, 1.25)
-# config["figure.figsize"] = (3.25, 1.4)
-
-plt.rcParams.update(config)
-
 from matplotlib.ticker import MultipleLocator
 
+config = bundles.icml2024(family="serif", column="half", usetex=True)
+config["figure.figsize"] = (3.25, 0.98)
+plt.rcParams.update(config)
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
 
 
@@ -165,7 +161,7 @@ def plot_and_save_aggregated(
             processed_label = label
 
         y_offset = label_offset_dict.get(
-            processed_label, 0.03
+            processed_label, 0.005 * 2 * (y_max - y_min)
         )  # Use the offset if available, otherwise default to 0.03
         ax.text(
             bar.get_x() + bar.get_width() / 2,
@@ -183,7 +179,7 @@ def plot_and_save_aggregated(
         else:
             bar.set_color(np.array([251.0, 188.0, 4.0]) / 255.0)
 
-        if processed_label == "Baseline":
+        if processed_label == "CE Baseline":
             bar.set_color(np.array([154.0, 160.0, 166.0]) / 255.0)
 
     # for i, (_, value) in enumerate(zip(bars, best_values)):
@@ -209,6 +205,21 @@ def plot_and_save_aggregated(
         ]
 
         # Adding the legend with adjusted handlelength to make the patches more square-like
+        # ax.legend(
+        #     frameon=False,
+        #     handles=legend_handles,
+        #     bbox_to_anchor=(1, 1.17),
+        #     loc="upper right",
+        #     fontsize="small",
+        #     handlelength=1,
+        #     ncol=2,
+        # )
+        if "AUROC" in suffix:
+            feed_dict = {"bbox_to_anchor": (1, 1.1)}
+        elif "AUC" in suffix:
+            feed_dict = {"bbox_to_anchor": (1, 1.25)}
+        else:
+            feed_dict = {}
         ax.legend(
             frameon=False,
             handles=legend_handles,
@@ -216,6 +227,7 @@ def plot_and_save_aggregated(
             fontsize="small",
             handlelength=1,
             ncol=2,
+            **feed_dict,
         )
 
     ax.set_ylim(bottom=y_min, top=y_max)
@@ -245,7 +257,9 @@ def main(args):
             return abs(x)
 
     else:
-        func = lambda x: x
+
+        def func(x):
+            return x
 
     for prefix in DATASET_CONVERSION_DICT_CIFAR:
         create_directory("results")
@@ -312,6 +326,10 @@ def main(args):
                     aggregated_key = ESTIMATOR_CONVERSION_DICT["error_probabilities"]
                 elif method_name == "Loss Pred.":
                     aggregated_key = ESTIMATOR_CONVERSION_DICT["risk_values"]
+                elif method_name == "DUQ":
+                    aggregated_key = ESTIMATOR_CONVERSION_DICT["duq_values"]
+                elif method_name == "DDU" and args.metric == "auroc_oodness":
+                    aggregated_key = ESTIMATOR_CONVERSION_DICT["gmm_neg_log_densities"]
                 elif method_name == "Mahalanobis":
                     aggregated_key = ESTIMATOR_CONVERSION_DICT["mahalanobis_values"]
                 else:

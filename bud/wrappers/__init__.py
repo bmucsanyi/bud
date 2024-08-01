@@ -5,6 +5,8 @@ from .correctness_prediction_wrapper import (
 )
 from .temperature_wrapper import TemperatureWrapper
 from .ddu_wrapper import DDUWrapper
+
+# from .ddu_wrapper import DDUWrapper
 from .deep_ensemble_wrapper import DeepEnsembleWrapper
 from .deterministic_wrapper import DeterministicWrapper
 from .dropout_wrapper import DropoutWrapper
@@ -13,7 +15,12 @@ from .hetxl_wrapper import HETXLWrapper
 from .laplace_wrapper import LaplaceWrapper
 from .mahalanobis_wrapper import MahalanobisWrapper
 from .mcinfonce_wrapper import MCInfoNCEWrapper
-from .model_wrapper import ModelWrapper, PosteriorWrapper, SpecialWrapper
+from .model_wrapper import (
+    ModelWrapper,
+    PosteriorWrapper,
+    SpecialWrapper,
+    DirichletWrapper,
+)
 from .nivmf_wrapper import NonIsotropicvMFWrapper
 from .loss_prediction_wrapper import (
     BaseLossPredictionWrapper,
@@ -22,3 +29,5 @@ from .loss_prediction_wrapper import (
 )
 from .shallow_ensemble_wrapper import ShallowEnsembleWrapper
 from .sngp_wrapper import SNGPWrapper
+from .edl_wrapper import EDLWrapper
+from .postnet_wrapper import PostNetWrapper

@@ -11,9 +11,10 @@ from utils import ID_TO_METHOD_CIFAR, create_directory
 
 from tueplots import bundles
 
-plt.rcParams.update(
-    bundles.icml2022(family="serif", usetex=True, nrows=1, column="half")
-)
+config = bundles.icml2024(family="serif", column="half", usetex=True)
+config["figure.figsize"] = (3.25, 1.7)
+
+plt.rcParams.update(config)
 
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
 
@@ -214,13 +215,19 @@ def main():
         )
 
         plt.xlabel("Severity Level")
-        plt.ylabel(r"AUROCs and Accuracy $\uparrow$")
+        plt.ylabel(r"Metric Values $\uparrow$")
         plt.ylim(0, 1)
 
         handles, labels = plt.gca().get_legend_handles_labels()
         handles = [h[0] for h in handles]
 
-        plt.legend(handles, labels, frameon=False)
+        plt.legend(
+            handles,
+            labels,
+            frameon=False,
+            loc="lower left",
+            bbox_to_anchor=(-0.02, -0.1),
+        )
         plt.grid(True, linewidth=0.5)
         plt.savefig(save_path)
         plt.clf()  # Clear the figure for the next plot

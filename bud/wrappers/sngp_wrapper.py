@@ -1,22 +1,22 @@
 """SNGP/GP implementation as a wrapper class.
 
-SNGP Google implementation based on https://github.com/google/edward2
-
-SNGP Original implementation based on https://github.com/pfnet-research/sngan_projection
-
-SNGP DUE implementation based on https://github.com/y0ast/DUE
-
+SNGP implementation based on https://github.com/google/edward2
 """
 
 from functools import partial
-from math import ceil
+import itertools
+import math
 
 import torch
 import torch.nn.functional as F
 from torch import nn
+from torch.nn.parameter import is_lazy
+from torch.nn.modules.batchnorm import _NormBase
 
-from bud.utils.replace import replace
+
+from bud.utils.replace import register, register_cond, replace
 from bud.wrappers.model_wrapper import PosteriorWrapper
+from bud.utils import calculate_same_padding, calculate_output_padding
 
 
 class GPOutputLayer(nn.Module):
@@ -321,7 +321,7 @@ class LaplaceRandomFeatureCovariance(nn.Module):
             training mode, the gp_weight covariance is updated using gp_feature.
 
         Returns:
-        gp_stddev (tf.Tensor): GP posterior predictive variance,
+        gp_stddev (torch.Tensor): GP posterior predictive variance,
             shape (batch_size, batch_size).
         """
         batch_size = inputs.shape[0]
@@ -355,634 +355,568 @@ class LaplaceRandomFeatureCovariance(nn.Module):
             return self.compute_predictive_covariance(gp_feature=inputs)
 
 
-class SpectralNormalizedConv2dGoogle(nn.Module):
+class LinearSpectralNormalizer(nn.Module):
     def __init__(
         self,
-        iteration: int,
-        bound: float,
-        conv2d: nn.Conv2d,
-    ):
+        module: nn.Module,
+        spectral_normalization_iteration: int,
+        spectral_normalization_bound: float,
+        dim: int,
+        eps: float,
+    ) -> None:
         super().__init__()
-        self.iteration = iteration
-        self.bound = bound
-        self.conv2d = conv2d
 
-        self.u = None
-        self.v = None
-        self.padding = None
-        self.agg_padding = None
-        self.output_padding = None
+        weight = module.weight
+        ndim = weight.ndim
 
-    def __getattr__(self, name: str):
-        if "_parameters" in self.__dict__:
-            _parameters = self.__dict__["_parameters"]
-            if name in _parameters:
-                return _parameters[name]
-        if "_buffers" in self.__dict__:
-            _buffers = self.__dict__["_buffers"]
-            if name in _buffers:
-                return _buffers[name]
-        if "_modules" in self.__dict__:
-            modules = self.__dict__["_modules"]
-            if name in modules:
-                return modules[name]
-        return getattr(self.conv2d, name)
+        self.spectral_normalization_iteration = spectral_normalization_iteration
+        self.spectral_normalization_bound = spectral_normalization_bound
+        self.dim = dim if dim >= 0 else dim + ndim
+        self.eps = eps
 
-    def initialize_uv(self, inputs):
-        in_height = inputs.shape[2]
-        in_width = inputs.shape[3]
-        in_channels = self.conv2d.in_channels
-        self.in_shape = (1, in_channels, in_height, in_width)
-        out_height = in_height // self.conv2d.stride[0]
-        out_width = in_width // self.conv2d.stride[1]
-        out_channels = self.conv2d.out_channels
-        self.out_shape = (1, out_channels, out_height, out_width)
-        device = self.conv2d.weight.device
+        if ndim > 1:
+            weight_matrix = self._reshape_weight_to_matrix(weight)
+            height, width = weight_matrix.shape
 
-        self.v = nn.Parameter(
-            torch.randn(self.in_shape, device=device), requires_grad=False
-        )
-        self.u = nn.Parameter(
-            torch.randn(self.out_shape, device=device), requires_grad=False
-        )
+            u = weight_matrix.new_empty(height).normal_(mean=0, std=1)
+            v = weight_matrix.new_empty(width).normal_(mean=0, std=1)
+            self.register_buffer("_u", F.normalize(u, dim=0, eps=self.eps))
+            self.register_buffer("_v", F.normalize(v, dim=0, eps=self.eps))
 
-    def forward(self, inputs):
-        with torch.no_grad():
-            if self.u is None:
-                self.initialize_uv(inputs)
-                self.padding = self.calc_same_padding(
-                    self.u.shape,
-                    self.conv2d.weight.shape,
-                    self.conv2d.stride,
-                    self.conv2d.dilation,
+            self._power_method(
+                weight_matrix=weight_matrix, spectral_normalization_iteration=15
+            )
+
+    def _reshape_weight_to_matrix(self, weight: torch.Tensor) -> torch.Tensor:
+        if self.dim > 0:
+            # Permute self.dim to front
+            weight = weight.permute(
+                self.dim, *(dim for dim in range(weight.dim()) if dim != self.dim)
+            )
+
+        weight_matrix = weight.flatten(start_dim=1)
+
+        return weight_matrix
+
+    @torch.no_grad()
+    def _power_method(
+        self, weight_matrix: torch.Tensor, spectral_normalization_iteration: int
+    ) -> None:
+        # See original note at torch/nn/utils/spectral_norm.py
+        # NB: If `do_power_iteration` is set, the `u` and `v` vectors are
+        #     updated in power iteration **in-place**. This is very important
+        #     because in `DataParallel` forward, the vectors (being buffers) are
+        #     broadcast from the parallelized module to each module replica,
+        #     which is a new module object created on the fly. And each replica
+        #     runs its own spectral norm power iteration. So simply assigning
+        #     the updated vectors to the module this function runs on will cause
+        #     the update to be lost forever. And the next time the parallelized
+        #     module is replicated, the same randomly initialized vectors are
+        #     broadcast and used!
+        #
+        #     Therefore, to make the change propagate back, we rely on two
+        #     important behaviors (also enforced via tests):
+        #       1. `DataParallel` doesn't clone storage if the broadcast tensor
+        #          is already on correct device; and it makes sure that the
+        #          parallelized module is already on `device[0]`.
+        #       2. If the out tensor in `out=` kwarg has correct shape, it will
+        #          just fill in the values.
+        #     Therefore, since the same power iteration is performed on all
+        #     devices, simply updating the tensors in-place will make sure that
+        #     the module replica on `device[0]` will update the _u vector on the
+        #     parallelized module (by shared storage).
+        #
+        #    However, after we update `u` and `v` in-place, we need to **clone**
+        #    them before using them to normalize the weight. This is to support
+        #    backproping through two forward passes, e.g., the common pattern in
+        #    GAN training: loss = D(real) - D(fake). Otherwise, engine will
+        #    complain that variables needed to do backward for the first forward
+        #    (i.e., the `u` and `v` vectors) are changed in the second forward.
+
+        # Precondition
+        assert weight_matrix.ndim == 2
+
+        for _ in range(spectral_normalization_iteration):
+            # u^\top W v = u^\top (\sigma u) = \sigma u^\top u = \sigma
+            # where u and v are the first left and right (unit) singular vectors,
+            # respectively. This power iteration produces approximations of u and v.
+            self._u = F.normalize(
+                weight_matrix @ self._v, dim=0, eps=self.eps, out=self._u
+            )
+            self._v = F.normalize(
+                weight_matrix.T @ self._u, dim=0, eps=self.eps, out=self._v
+            )
+
+    def forward(self, weight: torch.Tensor) -> torch.Tensor:
+        if weight.ndim == 1:
+            # Faster and more exact path, no need to approximate anything
+            weight_norm = weight.norm(p=2, dim=0).clamp_min(self.eps)
+            division_factor = torch.max(
+                torch.ones_like(weight_norm),
+                weight_norm / self.spectral_normalization_bound,
+            )
+
+            return weight / division_factor
+        else:
+            weight_matrix = self._reshape_weight_to_matrix(weight=weight)
+
+            if self.training:
+                self._power_method(
+                    weight_matrix=weight_matrix,
+                    spectral_normalization_iteration=self.spectral_normalization_iteration,
                 )
-                self.agg_padding = (
-                    ceil((self.padding[0] + self.padding[1]) / 2),
-                    ceil((self.padding[2] + self.padding[3]) / 2),
-                    # (self.padding[0] + self.padding[1]) // 2,
-                    # (self.padding[2] + self.padding[3]) // 2
-                )
-                self.output_padding = self.calc_output_padding(
-                    inputs=self.u,
-                    output_size=self.v.shape,
-                    stride=self.conv2d.stride,
-                    padding=self.agg_padding,
-                    kernel_size=self.conv2d.kernel_size,
-                    dilation=self.conv2d.dilation,
-                )
 
-            self.update_weight()
+            # See above on why we need to clone
+            u = self._u.clone(memory_format=torch.contiguous_format)
+            v = self._v.clone(memory_format=torch.contiguous_format)
 
-        output = self.conv2d(inputs)
+            sigma = u @ weight_matrix @ v
+            division_factor = torch.max(
+                torch.ones_like(sigma), sigma / self.spectral_normalization_bound
+            )
 
-        with torch.no_grad():
-            self.restore_weight()
+            return weight / division_factor
 
-        return output
+    def right_inverse(self, value: torch.Tensor) -> torch.Tensor:
+        return value
 
-    @staticmethod
-    def calc_output_padding(
-        inputs, output_size, stride, padding, kernel_size, dilation
-    ):
-        num_spatial_dims = 2
 
-        has_batch_dim = inputs.dim() == num_spatial_dims + 2
-        num_non_spatial_dims = 2 if has_batch_dim else 1
-        if len(output_size) == num_non_spatial_dims + num_spatial_dims:
-            output_size = output_size[num_non_spatial_dims:]
-        if len(output_size) != num_spatial_dims:
+class Conv2dSpectralNormalizer(nn.Module):
+    def __init__(
+        self,
+        module: nn.Module,
+        spectral_normalization_iteration: int,
+        spectral_normalization_bound: float,
+        eps: float,
+    ) -> None:
+        super().__init__()
+
+        if (
+            hasattr(module, "parametrizations")
+            and hasattr(module.parametrizations, "weight")
+            and Conv2dSpectralNormalizer in module.parametrizations.weight
+        ):
+            raise ValueError("Cannot register spectral normalization more than once.")
+
+        weight = module.weight
+        ndim = weight.ndim
+
+        if ndim != 4:
             raise ValueError(
-                (
-                    "ConvTranspose{}D: for {}D input, output_size must have {} or {} "
-                    "elements (got {})"
-                ).format(
-                    num_spatial_dims,
-                    inputs.dim(),
-                    num_spatial_dims,
-                    num_non_spatial_dims + num_spatial_dims,
-                    len(output_size),
-                )
+                f"Invalid weight shape: expected ndim = 4, received ndim = {ndim}"
             )
 
-        min_sizes = []
-        max_sizes = []
-        for d in range(num_spatial_dims):
-            dim_size = (
-                (inputs.size(d + num_non_spatial_dims) - 1) * stride[d]
-                - 2 * padding[d]
-                + (dilation[d] if dilation is not None else 1) * (kernel_size[d] - 1)
-                + 1
-            )
-            min_sizes.append(dim_size)
-            max_sizes.append(min_sizes[d] + stride[d] - 1)
+        self.spectral_normalization_iteration = spectral_normalization_iteration
+        self.spectral_normalization_bound = spectral_normalization_bound
+        self.eps = eps
 
-        for i in range(len(output_size)):
-            size = output_size[i]
-            min_size = min_sizes[i]
-            max_size = max_sizes[i]
-            if size < min_size or size > max_size:
-                raise ValueError(
-                    f"requested an output size of {output_size}, but valid sizes range "
-                    f"from {min_sizes} to {max_sizes} "
-                    f"(for an input of {inputs.size()[2:]})"
-                )
+        self.stride = module.stride
+        self.dilation = module.dilation
+        self.groups = module.groups
+        self.output_channels = module.out_channels
+        self.kernel_size = module.kernel_size
+        self.device = weight.device
+        self.weight_shape = weight.shape
 
-        res = []
-        for d in range(num_spatial_dims):
-            res.append(output_size[d] - min_sizes[d])
+        self.register_buffer("_u", nn.UninitializedBuffer())
+        self.register_buffer("_v", nn.UninitializedBuffer())
 
-        return tuple(res)
+        self._load_hook = self._register_load_state_dict_pre_hook(self._lazy_load_hook)
+        self._module_input_shape_hook = module.register_forward_pre_hook(
+            Conv2dSpectralNormalizer._module_set_input_shape, with_kwargs=True
+        )
+        self._initialize_hook = self.register_forward_pre_hook(
+            Conv2dSpectralNormalizer._infer_attributes, with_kwargs=True
+        )
 
     @staticmethod
-    def calc_same_padding(input_shape, filter_shape, stride, dilation):
-        """Calculates padding values for 'SAME' padding for conv2d.
+    def _module_set_input_shape(module, args, kwargs=None):
+        kwargs = kwargs or {}
+        input = kwargs["input"] if "input" in kwargs else args[0]
 
-        Args:
-            input_shape (tuple or list): Shape of the input data.
-                [batch, channels, height, width]
-            filter_shape (tuple or list): Shape of the filter/kernel.
-                [out_channels, in_channels, kernel_height, kernel_width]
-            stride (int or tuple): Stride of the convolution operation.
-            dilation (int or tuple): Dilation rate of the convolution operation.
-
-        Returns:
-            padding (tuple): Tuple representing padding
-                (padding_left, padding_right, padding_top, padding_bottom)
-        """
-        if isinstance(stride, int):
-            stride_height = stride_width = stride
-        else:
-            stride_height, stride_width = stride
-
-        if isinstance(dilation, int):
-            dilation_height, dilation_width = dilation, dilation
-        else:
-            dilation_height, dilation_width = dilation
-
-        in_height, in_width = input_shape[2], input_shape[3]
-        filter_height, filter_width = filter_shape[2], filter_shape[3]
-
-        effective_filter_height = filter_height + (filter_height - 1) * (
-            dilation_height - 1
-        )
-        effective_filter_width = filter_width + (filter_width - 1) * (
-            dilation_width - 1
-        )
-
-        if in_height % stride_height == 0:
-            pad_along_height = max(effective_filter_height - stride_height, 0)
-        else:
-            pad_along_height = max(
-                effective_filter_height - (in_height % stride_height), 0
-            )
-
-        if in_width % stride_width == 0:
-            pad_along_width = max(effective_filter_width - stride_width, 0)
-        else:
-            pad_along_width = max(effective_filter_width - (in_width % stride_width), 0)
-
-        pad_top = pad_along_height // 2
-        pad_bottom = pad_along_height - pad_top
-
-        pad_left = pad_along_width // 2
-        pad_right = pad_along_width - pad_left
-
-        return pad_left, pad_right, pad_top, pad_bottom
-
-    def update_weight(self):
-        u_hat = self.u
-        v_hat = self.v
-
-        if self.training:
-            for _ in range(self.iteration):
-                v_hat = F.conv_transpose2d(
-                    input=u_hat,
-                    weight=self.conv2d.weight,
-                    bias=self.conv2d.bias,
-                    stride=self.conv2d.stride,
-                    padding=self.agg_padding,
-                    output_padding=self.output_padding,
-                    groups=self.conv2d.groups,
-                    dilation=self.conv2d.dilation,
+        for parametrization in module.parametrizations.weight:
+            if isinstance(parametrization, Conv2dSpectralNormalizer):
+                input_channels, input_height, input_width = input.shape[1:]
+                parametrization.single_input_shape = (
+                    1,
+                    input_channels,
+                    input_height,
+                    input_width,
                 )
-                v_hat = F.normalize(v_hat.reshape(1, -1)).reshape(v_hat.shape)
 
-                v_hat_pad = F.pad(v_hat, self.padding)
-                u_hat = F.conv2d(
-                    input=v_hat_pad,
-                    weight=self.conv2d.weight,
-                    bias=self.conv2d.bias,
-                    stride=self.conv2d.stride,
-                    dilation=self.conv2d.dilation,
-                    groups=self.conv2d.groups,
+                # Infer output shape with batch size = 1. We know this without having
+                # to run the Conv2d module, as we use "same" padding in our internal
+                # calculations
+                output_channels = parametrization.output_channels
+                output_height = input_height // parametrization.stride[0]
+                output_width = input_width // parametrization.stride[1]
+                parametrization.single_output_shape = (
+                    1,
+                    output_channels,
+                    output_height,
+                    output_width,
                 )
-                u_hat = F.normalize(u_hat.reshape(1, -1)).reshape(u_hat.shape)
-        else:
-            v_hat_pad = F.pad(v_hat, self.padding)
 
-        v_w_hat = F.conv2d(
-            input=v_hat_pad,
-            weight=self.conv2d.weight,
-            bias=self.conv2d.bias,
-            stride=self.conv2d.stride,
-            dilation=self.conv2d.dilation,
-            groups=self.conv2d.groups,
-        )
+                # Infer input padding
+                parametrization.left_right_top_bottom_padding = calculate_same_padding(
+                    parametrization.single_output_shape,
+                    parametrization.weight_shape,
+                    parametrization.stride,
+                    parametrization.dilation,
+                )
+                total_width_height_padding = (
+                    parametrization.left_right_top_bottom_padding[0]
+                    + parametrization.left_right_top_bottom_padding[1],
+                    parametrization.left_right_top_bottom_padding[2]
+                    + parametrization.left_right_top_bottom_padding[3],
+                )
+                parametrization.per_side_width_height_padding = (
+                    math.ceil(total_width_height_padding[0] / 2),
+                    math.ceil(total_width_height_padding[1] / 2),
+                )
 
-        sigma = v_w_hat.flatten() @ u_hat.flatten()
+                # Infer output padding
+                parametrization.output_padding = calculate_output_padding(
+                    input_shape=parametrization.single_output_shape,
+                    output_shape=parametrization.single_input_shape,
+                    stride=parametrization.stride,
+                    padding=parametrization.per_side_width_height_padding,
+                    kernel_size=parametrization.kernel_size,
+                    dilation=parametrization.dilation,
+                )
 
-        if self.bound < sigma:
-            normed_weight = self.bound / sigma * self.conv2d.weight
-        else:
-            normed_weight = self.conv2d.weight
+                break  # Invariant: there is only one Conv2dSpectralNormalizer registered
 
-        self.u.copy_(u_hat)
-        self.v.copy_(v_hat)
-        self.saved_weight = self.conv2d.weight.clone().detach()
-        self.conv2d.weight.data = normed_weight  # Only way to circumvent autograd
+    def _has_uninitialized_buffers(self) -> bool:
+        buffers = self._buffers.values()
+        for buffer in buffers:
+            if is_lazy(buffer):
+                return True
+        return False
 
-    def restore_weight(self):
-        self.conv2d.weight.data = self.saved_weight
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        # This should be ideally implemented as a hook,
+        # but we should override `detach` in the UninitializedParameter to return itself
+        # which is not clean
+        for name, param in self._parameters.items():
+            if param is not None:
+                if not (is_lazy(param) or keep_vars):
+                    param = param.detach()
+                destination[prefix + name] = param
+        for name, buf in self._buffers.items():
+            if buf is not None and name not in self._non_persistent_buffers_set:
+                if not (is_lazy(buf) or keep_vars):
+                    buf = buf.detach()
+                destination[prefix + name] = buf
 
-
-class SpectralNormalizedConv2d(nn.Module):
-    def __init__(
+    def _lazy_load_hook(
         self,
-        iteration: int,
-        bound: float,
-        conv2d: nn.Conv2d,
+        state_dict,
+        prefix,
+        local_metadata,
+        strict,
+        missing_keys,
+        unexpected_keys,
+        error_msgs,
     ):
-        super().__init__()
-        self.iteration = iteration
-        self.bound = bound
-        self.conv2d = conv2d
+        """load_state_dict pre-hook function for lazy buffers and parameters.
 
-        self.u = None
-        self.v = None
-        self.padding = None
-        self.agg_padding = None
-        self.output_padding = None
-
-    def __getattr__(self, name: str):
-        if "_parameters" in self.__dict__:
-            _parameters = self.__dict__["_parameters"]
-            if name in _parameters:
-                return _parameters[name]
-        if "_buffers" in self.__dict__:
-            _buffers = self.__dict__["_buffers"]
-            if name in _buffers:
-                return _buffers[name]
-        if "_modules" in self.__dict__:
-            modules = self.__dict__["_modules"]
-            if name in modules:
-                return modules[name]
-        return getattr(self.conv2d, name)
-
-    def initialize_uv(self, inputs):
-        in_height = inputs.shape[2]
-        in_width = inputs.shape[3]
-        in_channels = self.conv2d.in_channels
-        self.in_shape = (1, in_channels, in_height, in_width)
-        out_height = in_height // self.conv2d.stride[0]
-        out_width = in_width // self.conv2d.stride[1]
-        out_channels = self.conv2d.out_channels
-        self.out_shape = (1, out_channels, out_height, out_width)
-        device = self.conv2d.weight.device
-
-        self.v = nn.Parameter(
-            torch.randn(self.in_shape, device=device), requires_grad=False
-        )
-        self.u = nn.Parameter(
-            torch.randn(self.out_shape, device=device), requires_grad=False
-        )
-
-    def forward(self, inputs):
-        with torch.no_grad():
-            if self.u is None:
-                self.initialize_uv(inputs)
-                self.padding = self.calc_same_padding(
-                    self.u.shape,
-                    self.conv2d.weight.shape,
-                    self.conv2d.stride,
-                    self.conv2d.dilation,
-                )
-                self.agg_padding = (
-                    ceil((self.padding[0] + self.padding[1]) / 2),
-                    ceil((self.padding[2] + self.padding[3]) / 2),
-                )
-                self.output_padding = self.calc_output_padding(
-                    inputs=self.u,
-                    output_size=self.v.shape,
-                    stride=self.conv2d.stride,
-                    padding=self.agg_padding,
-                    kernel_size=self.conv2d.kernel_size,
-                    dilation=self.conv2d.dilation,
-                )
-
-            factor = self.normalization_factor()
-
-        normed_weight = factor * self.conv2d.weight
-
-        output = F.conv2d(
-            input=inputs,
-            weight=normed_weight,
-            bias=self.conv2d.bias,
-            stride=self.conv2d.stride,
-            padding=self.conv2d.padding,
-            dilation=self.conv2d.dilation,
-            groups=self.conv2d.groups,
-        )
-
-        return output
-
-    @staticmethod
-    def calc_output_padding(
-        inputs, output_size, stride, padding, kernel_size, dilation
-    ):
-        num_spatial_dims = 2
-
-        has_batch_dim = inputs.dim() == num_spatial_dims + 2
-        num_non_spatial_dims = 2 if has_batch_dim else 1
-        if len(output_size) == num_non_spatial_dims + num_spatial_dims:
-            output_size = output_size[num_non_spatial_dims:]
-        if len(output_size) != num_spatial_dims:
-            raise ValueError(
-                (
-                    "ConvTranspose{}D: for {}D input, output_size must have {} or {} "
-                    "elements (got {})"
-                ).format(
-                    num_spatial_dims,
-                    inputs.dim(),
-                    num_spatial_dims,
-                    num_non_spatial_dims + num_spatial_dims,
-                    len(output_size),
-                )
-            )
-
-        min_sizes = []
-        max_sizes = []
-        for d in range(num_spatial_dims):
-            dim_size = (
-                (inputs.size(d + num_non_spatial_dims) - 1) * stride[d]
-                - 2 * padding[d]
-                + (dilation[d] if dilation is not None else 1) * (kernel_size[d] - 1)
-                + 1
-            )
-            min_sizes.append(dim_size)
-            max_sizes.append(min_sizes[d] + stride[d] - 1)
-
-        for i in range(len(output_size)):
-            size = output_size[i]
-            min_size = min_sizes[i]
-            max_size = max_sizes[i]
-            if size < min_size or size > max_size:
-                raise ValueError(
-                    f"requested an output size of {output_size}, but valid sizes range "
-                    f"from {min_sizes} to {max_sizes} "
-                    f"(for an input of {inputs.size()[2:]})"
-                )
-
-        res = []
-        for d in range(num_spatial_dims):
-            res.append(output_size[d] - min_sizes[d])
-
-        return tuple(res)
-
-    @staticmethod
-    def calc_same_padding(input_shape, filter_shape, stride, dilation):
-        """Calculates padding values for 'SAME' padding for conv2d.
-
-        Args:
-            input_shape (tuple or list): Shape of the input data.
-                [batch, channels, height, width]
-            filter_shape (tuple or list): Shape of the filter/kernel.
-                [out_channels, in_channels, kernel_height, kernel_width]
-            stride (int or tuple): Stride of the convolution operation.
-            dilation (int or tuple): Dilation rate of the convolution operation.
-
-        Returns:
-            padding (tuple): Tuple representing padding
-                (padding_left, padding_right, padding_top, padding_bottom)
+        The purpose of this hook is to adjust the current state and/or
+        ``state_dict`` being loaded so that a module instance serialized in
+        both un/initialized state can be deserialized onto both un/initialized
+        module instance.
+        See comment in ``torch.nn.Module._register_load_state_dict_pre_hook``
+        for the details of the hook specification.
         """
-        if isinstance(stride, int):
-            stride_height = stride_width = stride
-        else:
-            stride_height, stride_width = stride
+        for name, param in itertools.chain(
+            self._parameters.items(), self._buffers.items()
+        ):
+            key = prefix + name
+            if key in state_dict and param is not None:
+                input_param = state_dict[key]
+                if is_lazy(param):
+                    # The current parameter is not initialized but the one being loaded one is
+                    # create a new parameter based on the uninitialized one
+                    if not is_lazy(input_param):
+                        with torch.no_grad():
+                            param.materialize(input_param.shape)
 
-        if isinstance(dilation, int):
-            dilation_height, dilation_width = dilation, dilation
-        else:
-            dilation_height, dilation_width = dilation
+    @staticmethod
+    def _infer_attributes(module, args, kwargs=None):
+        r"""Infers the size and initializes the parameters according to the provided input batch.
 
-        in_height, in_width = input_shape[2], input_shape[3]
-        filter_height, filter_width = filter_shape[2], filter_shape[3]
-
-        effective_filter_height = filter_height + (filter_height - 1) * (
-            dilation_height - 1
-        )
-        effective_filter_width = filter_width + (filter_width - 1) * (
-            dilation_width - 1
-        )
-
-        if in_height % stride_height == 0:
-            pad_along_height = max(effective_filter_height - stride_height, 0)
-        else:
-            pad_along_height = max(
-                effective_filter_height - (in_height % stride_height), 0
+        Given a module that contains parameters that were declared inferrable
+        using :class:`torch.nn.parameter.ParameterMode.Infer`, runs a forward pass
+        in the complete module using the provided input to initialize all the parameters
+        as needed.
+        The module is set into evaluation mode before running the forward pass in order
+        to avoid saving statistics or calculating gradients
+        """
+        # Infer buffers
+        kwargs = kwargs or {}
+        module._initialize_buffers(*args, **kwargs)
+        if module._has_uninitialized_buffers():
+            raise RuntimeError(
+                f"module {module._get_name()} has not been fully initialized"
             )
 
-        if in_width % stride_width == 0:
-            pad_along_width = max(effective_filter_width - stride_width, 0)
-        else:
-            pad_along_width = max(effective_filter_width - (in_width % stride_width), 0)
+        # Remove hooks
+        module._load_hook.remove()
+        module._module_input_shape_hook.remove()
+        module._initialize_hook.remove()
+        delattr(module, "_load_hook")
+        delattr(module, "_module_input_shape_hook")
+        delattr(module, "_initialize_hook")
 
-        pad_top = pad_along_height // 2
-        pad_bottom = pad_along_height - pad_top
-
-        pad_left = pad_along_width // 2
-        pad_right = pad_along_width - pad_left
-
-        return pad_left, pad_right, pad_top, pad_bottom
-
-    def normalization_factor(self):
-        u_hat = self.u
-        v_hat = self.v
-
-        if self.training:
-            for _ in range(self.iteration):
-                v_hat = F.conv_transpose2d(
-                    input=u_hat,
-                    weight=self.conv2d.weight,
-                    bias=self.conv2d.bias,
-                    stride=self.conv2d.stride,
-                    padding=self.agg_padding,
-                    output_padding=self.output_padding,
-                    groups=self.conv2d.groups,
-                    dilation=self.conv2d.dilation,
-                )
-                v_hat = F.normalize(v_hat.reshape(1, -1)).reshape(v_hat.shape)
-
-                v_hat_pad = F.pad(v_hat, self.padding)
-                u_hat = F.conv2d(
-                    input=v_hat_pad,
-                    weight=self.conv2d.weight,
-                    bias=self.conv2d.bias,
-                    stride=self.conv2d.stride,
-                    dilation=self.conv2d.dilation,
-                    groups=self.conv2d.groups,
-                )
-                u_hat = F.normalize(u_hat.reshape(1, -1)).reshape(u_hat.shape)
-        else:
-            v_hat_pad = F.pad(v_hat, self.padding)
-
-        v_w_hat = F.conv2d(
-            input=v_hat_pad,
-            weight=self.conv2d.weight,
-            bias=self.conv2d.bias,
-            stride=self.conv2d.stride,
-            dilation=self.conv2d.dilation,
-            groups=self.conv2d.groups,
-        )
-
-        sigma = v_w_hat.flatten() @ u_hat.flatten()
-
-        if self.bound < sigma:
-            factor = self.bound / sigma
-        else:
-            factor = 1
-
-        self.u.copy_(u_hat)
-        self.v.copy_(v_hat)
-
-        return factor
-
-
-class SpectralNormalizedConv2dDUE(nn.Module):
-    def __init__(
-        self,
-        iteration: int,
-        bound: float,
-        conv2d: nn.Conv2d,
-    ):
-        super().__init__()
-        self.iteration = iteration
-        self.bound = bound
-        self.conv2d = conv2d
-
-    def __getattr__(self, name: str):
-        if "_parameters" in self.__dict__:
-            _parameters = self.__dict__["_parameters"]
-            if name in _parameters:
-                return _parameters[name]
-        if "_buffers" in self.__dict__:
-            _buffers = self.__dict__["_buffers"]
-            if name in _buffers:
-                return _buffers[name]
-        if "_modules" in self.__dict__:
-            modules = self.__dict__["_modules"]
-            if name in modules:
-                return modules[name]
-        return getattr(self.conv2d, name)
-
-    def initialize_uv(self, inputs):
-        in_height = inputs.shape[2]
-        in_width = inputs.shape[3]
-        in_channels = self.conv2d.in_channels
-        self.in_shape = (1, in_channels, in_height, in_width)
-        out_height = in_height // self.conv2d.stride[0]
-        out_width = in_width // self.conv2d.stride[1]
-        out_channels = self.conv2d.out_channels
-        self.out_shape = (1, out_channels, out_height, out_width)
-        device = self.conv2d.weight.device
-
-        self.v = nn.Parameter(
-            F.normalize(
-                torch.randn(self.in_shape, device=device).flatten(), dim=0
-            ).reshape(self.in_shape),
-            requires_grad=False,
-        )
-        self.u = nn.Parameter(
-            F.normalize(
-                torch.randn(self.out_shape, device=device).flatten(), dim=0
-            ).reshape(self.out_shape),
-            requires_grad=False,
-        )
-
-    def forward(self, inputs):
-        with torch.no_grad():
-            if not hasattr(self, "u"):
-                self.initialize_uv(inputs)
-
-        factor = self.normalization_factor()
-        normed_weight = factor * self.conv2d.weight
-
-        output = F.conv2d(
-            input=inputs,
-            weight=normed_weight,
-            bias=self.conv2d.bias,
-            stride=self.conv2d.stride,
-            padding=self.conv2d.padding,
-            dilation=self.conv2d.dilation,
-            groups=self.conv2d.groups,
-        )
-
-        return output
-
-    def normalization_factor(self):
-        u = self.u
-        v = self.v
-
-        if self.training:
+    def _initialize_buffers(self, weight) -> None:
+        if self._has_uninitialized_buffers():
             with torch.no_grad():
-                output_padding = 0
-                if self.conv2d.stride[0] > 1:
-                    output_padding = 1 - self.in_shape[-1] % 2
+                flattened_input_shape = math.prod(self.single_input_shape)
+                flattened_output_shape = math.prod(self.single_output_shape)
 
-                for _ in range(self.iteration):
-                    v_s = F.conv_transpose2d(
-                        input=u,
-                        weight=self.conv2d.weight,
-                        bias=self.conv2d.bias,
-                        stride=self.conv2d.stride,
-                        padding=self.conv2d.padding,
-                        output_padding=output_padding,
-                        groups=self.conv2d.groups,
-                        dilation=self.conv2d.dilation,
-                    )
-                    v = F.normalize(v_s.flatten(), dim=0).reshape(v_s.shape)
+                device = weight.device
 
-                    u_s = F.conv2d(
-                        input=v,
-                        weight=self.conv2d.weight,
-                        bias=self.conv2d.bias,
-                        stride=self.conv2d.stride,
-                        padding=self.conv2d.padding,
-                        dilation=self.conv2d.dilation,
-                        groups=self.conv2d.groups,
-                    )
-                    u = F.normalize(u_s.flatten(), dim=0).reshape(u_s.shape)
+                # Materialize buffers
+                self._u.materialize(shape=flattened_output_shape, device=device)
+                self._v.materialize(shape=flattened_input_shape, device=device)
 
-        weight_v = F.conv2d(
-            input=v,
-            weight=self.conv2d.weight,
-            bias=self.conv2d.bias,
-            stride=self.conv2d.stride,
-            padding=self.conv2d.padding,
-            dilation=self.conv2d.dilation,
-            groups=self.conv2d.groups,
+                # Initialize buffers randomly
+                nn.init.normal_(self._u)
+                nn.init.normal_(self._v)
+
+                # Initialize buffers with correct values. We do 50 iterations to have
+                # a good approximation of the correct singular vectors and the value
+                self._power_method(weight=weight, spectral_normalization_iteration=50)
+
+    def _replicate_for_data_parallel(self):
+        if self._has_uninitialized_buffers():
+            raise RuntimeError(
+                "Modules with uninitialized parameters can't be used with `DataParallel`. "
+                "Run a dummy forward pass to correctly initialize the modules"
+            )
+
+        return super()._replicate_for_data_parallel()
+
+    # TODO: add dummy fw pass if data parallel needed; add it in later release
+
+    @torch.no_grad()
+    def _power_method(
+        self, weight: torch.Tensor, spectral_normalization_iteration: int
+    ) -> None:
+        # See original note at torch/nn/utils/spectral_norm.py
+        # NB: If `do_power_iteration` is set, the `u` and `v` vectors are
+        #     updated in power iteration **in-place**. This is very important
+        #     because in `DataParallel` forward, the vectors (being buffers) are
+        #     broadcast from the parallelized module to each module replica,
+        #     which is a new module object created on the fly. And each replica
+        #     runs its own spectral norm power iteration. So simply assigning
+        #     the updated vectors to the module this function runs on will cause
+        #     the update to be lost forever. And the next time the parallelized
+        #     module is replicated, the same randomly initialized vectors are
+        #     broadcast and used!
+        #
+        #     Therefore, to make the change propagate back, we rely on two
+        #     important behaviors (also enforced via tests):
+        #       1. `DataParallel` doesn't clone storage if the broadcast tensor
+        #          is already on correct device; and it makes sure that the
+        #          parallelized module is already on `device[0]`.
+        #       2. If the out tensor in `out=` kwarg has correct shape, it will
+        #          just fill in the values.
+        #     Therefore, since the same power iteration is performed on all
+        #     devices, simply updating the tensors in-place will make sure that
+        #     the module replica on `device[0]` will update the _u vector on the
+        #     parallelized module (by shared storage).
+        #
+        #    However, after we update `u` and `v` in-place, we need to **clone**
+        #    them before using them to normalize the weight. This is to support
+        #    backproping through two forward passes, e.g., the common pattern in
+        #    GAN training: loss = D(real) - D(fake). Otherwise, engine will
+        #    complain that variables needed to do backward for the first forward
+        #    (i.e., the `u` and `v` vectors) are changed in the second forward.
+
+        for _ in range(spectral_normalization_iteration):
+            # u^\top W v = u^\top (\sigma u) = \sigma u^\top u = \sigma
+            # where u and v are the first left and right (unit) singular vectors,
+            # respectively. This power iteration produces approximations of u and v.
+
+            # TODO: possibly get rid of "same" padding?
+            v_shaped = F.conv_transpose2d(
+                input=self._u.view(self.single_output_shape),
+                weight=weight,
+                bias=None,
+                stride=self.stride,
+                padding=self.per_side_width_height_padding,
+                output_padding=self.output_padding,
+                groups=self.groups,
+                dilation=self.dilation,
+            )
+
+            self._v = F.normalize(
+                input=v_shaped.view(-1), dim=0, eps=self.eps, out=self._v
+            )
+
+            v_padded = F.pad(
+                self._v.view(self.single_input_shape),
+                self.left_right_top_bottom_padding,
+            )
+            u_shaped = F.conv2d(
+                input=v_padded,
+                weight=weight,
+                bias=None,
+                stride=self.stride,
+                dilation=self.dilation,
+                groups=self.groups,
+            )
+
+            self._u = F.normalize(
+                input=u_shaped.view(-1), dim=0, eps=self.eps, out=self._u
+            )
+
+    def forward(self, weight: torch.Tensor) -> torch.Tensor:
+        if self.training:
+            self._power_method(
+                weight=weight,
+                spectral_normalization_iteration=self.spectral_normalization_iteration,
+            )
+
+        # See above on why we need to clone
+        u = self._u.clone(memory_format=torch.contiguous_format)
+        v = self._v.clone(memory_format=torch.contiguous_format)
+
+        # Pad v to have the "same" padding effect
+        v_padded = F.pad(
+            v.view(self.single_input_shape), self.left_right_top_bottom_padding
         )
 
-        sigma = weight_v.flatten() @ u.flatten()
+        # Apply the _unnormalized_ weight to v
+        weight_v = F.conv2d(
+            input=v_padded,
+            weight=weight,
+            bias=None,
+            stride=self.stride,
+            dilation=self.dilation,
+            groups=self.groups,
+        )
 
-        if self.bound < sigma:
-            factor = self.bound / sigma
+        # Estimate largest singular value
+        sigma = weight_v.view(-1) @ u.view(-1)
+
+        # Calculate factor to divide weight by; pay attention to numerical stability
+        division_factor = torch.max(
+            torch.ones_like(sigma), sigma / self.spectral_normalization_bound
+        ).clamp_min(self.eps)
+
+        return weight / division_factor
+
+    def right_inverse(self, value: torch.Tensor) -> torch.Tensor:
+        return value
+
+
+class _SpectralNormalizedBatchNorm(_NormBase):
+    def __init__(
+        self,
+        num_features: int,
+        spectral_normalization_bound: float,
+        eps: float = 1e-5,
+        momentum: float = 0.01,
+        affine: bool = True,
+        track_running_stats: bool = True,
+        device=None,
+        dtype=None,
+    ) -> None:
+        # Momentum is 0.01 by default instead of 0.1 of BN which alleviates noisy power
+        # iteration. Code is based on torch.nn.modules._NormBase
+
+        factory_kwargs = {"device": device, "dtype": dtype}
+        super().__init__(
+            num_features, eps, momentum, affine, track_running_stats, **factory_kwargs
+        )
+        self.spectral_normalization_bound = spectral_normalization_bound
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        self._check_input_dim(input)
+
+        # exponential_average_factor is set to self.momentum
+        # (when it is available) only so that it gets updated
+        # in ONNX graph when this node is exported to ONNX
+        if self.momentum is None:
+            exponential_average_factor = 0.0
         else:
-            factor = 1
+            exponential_average_factor = self.momentum
 
-        self.u.copy_(u)
-        self.v.copy_(v)
+        if self.training and self.track_running_stats:
+            # If statement only here to tell the jit to skip emitting this when it
+            # is None
+            if self.num_batches_tracked is not None:
+                self.num_batches_tracked = self.num_batches_tracked + 1
+                if self.momentum is None:  # Use cumulative moving average
+                    exponential_average_factor = 1.0 / float(self.num_batches_tracked)
+                else:  # Use exponential moving average
+                    exponential_average_factor = self.momentum
 
-        return factor
+        # Decide whether the mini-batch stats should be used for normalization rather
+        # than the buffers. Mini-batch stats are used in training mode, and in eval mode
+        # when buffers are None
+        if self.training:
+            bn_training = True
+        else:
+            bn_training = (self.running_mean is None) and (self.running_var is None)
+
+        # Buffers are only updated if they are to be tracked and we are in training
+        # mode. Thus they only need to be passed when the update should occur (i.e. in
+        # training mode when they are tracked), or when buffer stats are used for
+        # normalization (i.e. in eval mode when buffers are not None)
+
+        # Before the foward pass, estimate the Lipschitz constant of the layer and
+        # divide through by it so that the Lipschitz constant of the batch norm operator
+        # is at most self.coeff
+        weight = (
+            torch.ones_like(self.running_var) if self.weight is None else self.weight
+        )
+        # See https://arxiv.org/pdf/1804.04368.pdf, equation 28 for why this is correct
+        lipschitz = torch.max(torch.abs(weight * (self.running_var + self.eps) ** -0.5))
+
+        # If the Lipschitz constant of the operation is greater than coeff, then we want
+        # to divide the input by a constant to force the overall Lipchitz factor of the
+        # batch norm to be exactly coeff
+        lipschitz_factor = torch.max(
+            lipschitz / self.spectral_normalization_bound, torch.ones_like(lipschitz)
+        )
+
+        weight = weight / lipschitz_factor
+
+        return F.batch_norm(
+            input,
+            # If buffers are not to be tracked, ensure that they won't be updated
+            (
+                self.running_mean
+                if not self.training or self.track_running_stats
+                else None
+            ),
+            self.running_var if not self.training or self.track_running_stats else None,
+            weight,
+            self.bias,
+            bn_training,
+            exponential_average_factor,
+            self.eps,
+        )
+
+
+class SpectralNormalizedBatchNorm2d(_SpectralNormalizedBatchNorm):
+    def __init__(self, module, spectral_normalization_bound: float) -> None:
+        # TODO: set bn-momentum to 0.01 if we use this!
+        super().__init__(
+            module.num_features,
+            spectral_normalization_bound,
+            module.eps,
+            module.momentum,
+            module.affine,
+            module.track_running_stats,
+        )
+
+    def _check_input_dim(self, input):
+        if input.dim() != 4:
+            raise ValueError(f"expected 4D input (got {input.dim()}D input)")
 
 
 class SNGPWrapper(PosteriorWrapper):
@@ -994,9 +928,10 @@ class SNGPWrapper(PosteriorWrapper):
         self,
         model: nn.Module,
         is_spectral_normalized: bool,
+        use_tight_norm_for_pointwise_convs: bool,  # TODO: read up on the paper again
         spectral_normalization_iteration: int,
         spectral_normalization_bound: float,
-        sngp_version: str,
+        is_batch_norm_spectral_normalized: bool,
         num_mc_samples: int,
         num_random_features: int,
         gp_kernel_scale: float,
@@ -1005,7 +940,7 @@ class SNGPWrapper(PosteriorWrapper):
         is_gp_input_normalized: bool,
         gp_cov_momentum: float,
         gp_cov_ridge_penalty: float,
-        gp_input_dim,
+        gp_input_dim: int,
     ):
         super().__init__(model)
 
@@ -1052,21 +987,53 @@ class SNGPWrapper(PosteriorWrapper):
         self.classifier = classifier
 
         if is_spectral_normalized:
-            if sngp_version == "google":
-                conv = SpectralNormalizedConv2dGoogle
-            elif sngp_version == "original":
-                conv = SpectralNormalizedConv2d
-            elif sngp_version == "due":
-                conv = SpectralNormalizedConv2dDUE
-            else:
-                raise ValueError("Invalid version provided")
-
-            SNC = partial(
-                conv,
-                spectral_normalization_iteration,
-                spectral_normalization_bound,
+            LSN = partial(
+                LinearSpectralNormalizer,
+                spectral_normalization_iteration=spectral_normalization_iteration,
+                spectral_normalization_bound=spectral_normalization_bound,
+                dim=0,
+                eps=1e-12,
             )
-            replace(model, "Conv2d", SNC)
+
+            CSN = partial(
+                Conv2dSpectralNormalizer,
+                spectral_normalization_iteration=spectral_normalization_iteration,
+                spectral_normalization_bound=spectral_normalization_bound,
+                eps=1e-12,
+            )
+
+            SNBN = partial(
+                SpectralNormalizedBatchNorm2d,
+                spectral_normalization_bound=spectral_normalization_bound,
+            )
+
+            if use_tight_norm_for_pointwise_convs:
+
+                def is_pointwise_conv(conv2d: nn.Conv2d) -> bool:
+                    return conv2d.kernel_size == (1, 1)
+
+                register_cond(
+                    model=model,
+                    source_regex="Conv2d",
+                    attribute_name="weight",
+                    cond=is_pointwise_conv,
+                    target_parametrization_true=LSN,
+                    target_parametrization_false=CSN,
+                )
+            else:
+                register(
+                    model=model,
+                    source_regex="Conv2d",
+                    attribute_name="weight",
+                    target_parametrization=CSN,
+                )
+
+            if is_batch_norm_spectral_normalized:
+                replace(
+                    model=model,
+                    source_regex="BatchNorm2d",
+                    target_module=SNBN,
+                )
 
     @torch.jit.ignore
     def get_classifier(self):

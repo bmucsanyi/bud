@@ -5,7 +5,7 @@ from tqdm import tqdm
 import wandb
 
 from tueplots import bundles
-from scipy.stats import spearmanr
+from scipy.stats import pearsonr
 import sys
 import json
 
@@ -16,10 +16,7 @@ from utils import (
     create_directory,
 )
 
-plt.rcParams.update(
-    bundles.icml2022(family="serif", usetex=True, nrows=1, column="half")
-)
-
+plt.rcParams.update(bundles.icml2024(family="serif", column="half", usetex=True))
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
 
 
@@ -34,29 +31,31 @@ def main():
     api = wandb.Api()
 
     create_directory("results")
-    create_directory(f"results/correlation_matrix")
+    create_directory("results/correlation_matrix")
 
     metric_dict = {
-        "log_prob_score_hard_bma_correctness": "Log Prob.",
-        "brier_score_hard_bma_correctness": "Brier",
-        "ece_hard_bma_correctness": "-ECE (*)",
-        "auroc_hard_bma_correctness": "Correctness",
-        "cumulative_hard_bma_abstinence_auc": "Abstinence",
+        "auroc_hard_bma_correctness": "Correctness AUROC",
+        "ece_hard_bma_correctness": "-ECE",
+        "brier_score_hard_bma_correctness": "Brier Score",
+        "log_prob_score_hard_bma_correctness": "Log Prob. Score",
+        "cumulative_hard_bma_abstinence_auc": "Abstinence AUC",
         "hard_bma_accuracy": "Accuracy",
-        "rank_correlation_bregman_au": "Aleatoric",
-        "auroc_oodness": "OOD (*)",
+        "rank_correlation_bregman_au": "Aleatoric Rank Corr.",
+        "auroc_oodness": "OOD AUROC",
     }
 
     id_to_method = {
-        "hx2ni3sr": "GP",
+        "46elax73": "GP",
         "ktze6y0c": "HET-XL",
-        "7y7e6kjf": "Baseline",
-        "f52l00hb": "Dropout",
-        "us8v6277": "SNGP",
+        "3zt619eq": "CE Baseline",
+        "f52l00hb": "MC-Dropout",
+        "ew6b0m1x": "SNGP",
         "795iqrk8": "Shallow Ens.",
         "iskn1vp6": "Corr. Pred.",
-        "wzx8xxbn": "Deep Ens.",
-        "tri75olb": "Laplace",
+        "1nz1l6qj": "Deep Ens.",
+        "0qpln50b": "Laplace",
+        "yxvvtw51": "Temperature",
+        "5exmovzc": "DDU",
     }
 
     fig, ax = plt.subplots()
@@ -78,7 +77,7 @@ def main():
             sweep = api.sweep(f"bmucsanyi/bias/{method_id}")
 
             for i, (metric_id, metric_name) in enumerate(metric_dict.items()):
-                prefix = id_prefix if metric_name != "OOD (*)" else mixture_prefix
+                prefix = id_prefix if metric_name != "OOD AUROC" else mixture_prefix
 
                 estimator_dict = {}
 
@@ -103,7 +102,7 @@ def main():
                             else:
                                 estimator_dict[stripped_key].append(run.summary[key])
 
-                            if metric_name == "-ECE (*)":
+                            if metric_name == "-ECE":
                                 estimator_dict[stripped_key][-1] *= -1
 
                 for key in tuple(estimator_dict.keys()):
@@ -127,17 +126,14 @@ def main():
         for j in range(len(metric_dict)):
             perf_i = performance_matrix[i, :]
             perf_j = performance_matrix[j, :]
-            correlation_matrix[i, j] = spearmanr(perf_i, perf_j)[0]
-
-    # Create a mask for the upper triangle
-    mask = np.triu(np.ones_like(correlation_matrix, dtype=bool), k=0)
+            correlation_matrix[i, j] = pearsonr(perf_i, perf_j)[0]
 
     # Choose a diverging colormap
     cmap = plt.get_cmap("coolwarm")
 
     # Plot the heatmap, applying the mask
     cax = ax.imshow(
-        np.ma.masked_where(mask, correlation_matrix),
+        correlation_matrix,
         interpolation="nearest",
         cmap=cmap,
         vmin=-1,
@@ -148,8 +144,9 @@ def main():
     cbar = fig.colorbar(cax)
     cbar.outline.set_visible(False)
     cbar.ax.tick_params(width=0.1)
-    cbar.set_ticks([-0.987, -0.5, 0, 0.5, 1])
-    cbar.set_ticklabels(["$-1$", "$-0.5$", "$0$", "$0.5$", "$1$"])
+    cbar.set_ticks([-0.983, 0, 1.01])
+    # cbar.set_ticklabels(["-1 (Neg. Corr.)", "0 (No Corr.)", "1 (Pos. Corr.)"])
+    cbar.set_ticklabels(["-1", "0", "1"])
 
     # Set ticks
     ax.set_xticks(np.arange(len(metric_dict)))
@@ -161,20 +158,20 @@ def main():
 
     # Rotate the tick labels and set their alignment
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+    # plt.setp(ax.get_yticklabels(), rotation=45, ha="right", rotation_mode="anchor")
 
     # Loop over data dimensions and create text annotations for only the lower triangle
     for i in range(len(metric_dict)):
         for j in range(len(metric_dict)):
-            if i > j:
-                ax.text(
-                    j,
-                    i,
-                    round(correlation_matrix[i, j], 3),
-                    ha="center",
-                    va="center",
-                    color="black",
-                    fontsize=5,
-                )
+            ax.text(
+                j,
+                i,
+                round(correlation_matrix[i, j], 2),
+                ha="center",
+                va="center",
+                color="black",
+                fontsize=5,
+            )
     ax.spines[["right", "top"]].set_visible(False)
     plt.savefig("results/correlation_matrix/correlation_matrix.pdf")
 

@@ -1,17 +1,21 @@
 import os
+import sys
 import matplotlib.pyplot as plt
 
 import numpy as np
 from tqdm import tqdm
 import wandb
 import json
+from collections import OrderedDict
 
 from tueplots import bundles
 from scipy.stats import spearmanr
 
-plt.rcParams.update(
-    bundles.icml2022(family="serif", usetex=True, nrows=1, column="half")
-)
+sys.path.insert(0, "..")
+
+from utils import ESTIMATOR_CONVERSION_DICT, ESTIMATORLESS_METRICS
+
+plt.rcParams.update(bundles.icml2024(family="serif", column="half", usetex=True))
 
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
 
@@ -22,24 +26,6 @@ def create_directory(path):
         os.makedirs(path)
 
 
-ESTIMATOR_CONVERSION_DICT = {
-    "entropies_of_fbar": r"$\mathbb{H}(\bar{f})$",
-    "entropies_of_bma": r"$\text{PU}^\text{it}$",
-    "expected_entropies": r"$\text{AU}^\text{it}$",
-    "expected_entropies_plus_expected_divergences": r"$\text{AU}^\text{it} + \text{EU}^\text{b}$",
-    "one_minus_max_probs_of_fbar": r"$\max \bar{f}$",
-    "one_minus_max_probs_of_bma": r"$\max \tilde{f}$",
-    "one_minus_expected_max_probs": r"$\mathbb{E}\left[\max f\right]$",
-    "expected_divergences": r"$\text{EU}^\text{b}$",
-    "jensen_shannon_divergences": r"$\text{EU}^\text{it}$",
-    "error_probabilities": r"$u^\text{cp}$",
-    "duq_values": r"$u^\text{duq}$",
-    "mahalanobis_values": r"$u^\text{mah}$",
-    "risk_values": r"$u^\text{rp}$",
-    "hard_bma_accuracy": None,
-}
-
-
 def main():
     with open("../../wandb_key.json") as f:
         wandb_key = json.load(f)["key"]
@@ -48,29 +34,31 @@ def main():
     api = wandb.Api()
 
     method_to_ids = {
-        "GP": ("hx2ni3sr", "2vkuhe38"),
+        "GP": ("46elax73", "wl683ek8"),
         "HET-XL": ("ktze6y0c", "3vnnnaix"),
-        "Baseline": ("7y7e6kjf", "gypg5gc8"),
-        "Dropout": ("f52l00hb", "9jztoaos"),
-        "SNGP": ("us8v6277", "f32n7c05"),
+        "CE Baseline": ("3zt619eq", "gypg5gc8"),
+        "MC-Dropout": ("f52l00hb", "9jztoaos"),
+        "SNGP": ("ew6b0m1x", "16k5i0w8"),
         "Shallow Ens.": ("795iqrk8", "6r8nfwqc"),
         "Loss Pred.": ("kl7436jj", "960a6hfa"),
         "Corr. Pred.": ("iskn1vp6", "xsvl0zop"),
-        "Deep Ens.": ("wzx8xxbn", "ymq2jv64"),
-        "Laplace": ("tri75olb", "gkvfnbup"),
-        "Mahalanobis": ("somhugzm", "swr2k8kf"),
+        "Deep Ens.": ("1nz1l6qj", "ymq2jv64"),
+        "Laplace": ("0qpln50b", "7kksw6rj"),
+        "Mahalanobis": ("mp53zl2m", "swr2k8kf"),
+        "DDU": ("5exmovzc", "oj31fxin"),
+        "Temperature": ("yxvvtw51", "n85ctsck"),
     }
 
-    metric_dict = {
-        "log_prob_score_hard_bma_correctness": "Log Prob.",
-        "brier_score_hard_bma_correctness": "Brier",
-        "ece_hard_bma_correctness": "-ECE (*)",
-        "auroc_hard_bma_correctness": "Correctness",
-        "cumulative_hard_bma_abstinence_auc": "Abstinence",
-        "hard_bma_accuracy": "Accuracy",
-        "rank_correlation_bregman_au": "Aleatoric",
-        "auroc_oodness": "OOD (*)",
-    }
+    metric_dict = OrderedDict(
+        auroc_hard_bma_correctness="Correctness",
+        cumulative_hard_bma_abstinence_auc="Abstinence",
+        log_prob_score_hard_bma_correctness="Log Prob.",
+        brier_score_hard_bma_correctness="Brier",
+        rank_correlation_bregman_au="Aleatoric",
+        ece_hard_bma_correctness="-ECE",
+        auroc_oodness="OOD",
+        hard_bma_accuracy="Accuracy",
+    )
 
     performance_matrix_imagenet = np.zeros((len(metric_dict), len(method_to_ids), 3))
     performance_matrix_cifar = np.zeros((len(metric_dict), len(method_to_ids), 3))
@@ -101,7 +89,7 @@ def main():
                     [performance_matrix_imagenet, performance_matrix_cifar],
                     [mixture_prefix_imagenet, mixture_prefix_cifar],
                 ):
-                    prefix = id_prefix if metric_name != "OOD (*)" else prefix
+                    prefix = id_prefix if metric_name != "OOD" else prefix
                     estimator_dict = {}
                     for run in sweep.runs:
                         for key in sorted(run.summary.keys()):
@@ -110,9 +98,12 @@ def main():
                                     f"_{metric_id}", ""
                                 )
 
-                                if (
-                                    "mixed" in stripped_key
-                                    or stripped_key not in ESTIMATOR_CONVERSION_DICT
+                                if "mixed" in stripped_key or (
+                                    (
+                                        "gt" in stripped_key
+                                        or stripped_key not in ESTIMATOR_CONVERSION_DICT
+                                    )
+                                    and stripped_key not in ESTIMATORLESS_METRICS
                                 ):
                                     continue
 
@@ -123,7 +114,7 @@ def main():
                                         run.summary[key]
                                     )
 
-                                if metric_name == "-ECE (*)":
+                                if metric_name == "-ECE":
                                     estimator_dict[stripped_key][-1] *= -1
 
                     for key in tuple(estimator_dict.keys()):
@@ -153,7 +144,8 @@ def main():
         perf_cifar = performance_matrix_cifar[i, :]
         correlation_vector[i] = spearmanr(perf_imagenet, perf_cifar)[0]
 
-    print(correlation_vector)
+    print(list(metric_dict.values()))
+    print([round(vec, 3) for vec in correlation_vector])
 
 
 if __name__ == "__main__":

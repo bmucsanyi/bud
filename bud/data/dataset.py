@@ -135,9 +135,6 @@ class IterableImageDataset(data.IterableDataset):
             elif self.transform is not None:
                 img = self.transform(img)
 
-            if img.dtype != torch.float32:
-                print(img.dtype)
-
             if self.target_transform is not None:
                 target = self.target_transform(target)
             yield img, target
@@ -233,7 +230,7 @@ class SoftImageNet(ImageNet):
         self.is_ood = False
 
     def __getitem__(self, index: int) -> Tuple[Any, Any]:
-        path, _ = self.samples[index]
+        path, original_target = self.samples[index]
         img = self.loader(path)
         if self.transform is not None and self.is_ood:
             rng = np.random.default_rng(seed=index)
@@ -244,12 +241,13 @@ class SoftImageNet(ImageNet):
         converted_index = self.filepath_to_softid[
             os.path.split(self.samples[index][0])[-1]
         ]
-        target = self.soft_labels[converted_index, :]
+        soft_target = self.soft_labels[converted_index, :]
+        augmented_target = np.concatenate([soft_target, [original_target]])
 
         if self.target_transform is not None:
-            target = self.target_transform(target)
+            augmented_target = self.target_transform(augmented_target)
 
-        return img, target
+        return img, augmented_target
 
     def set_ood(self):
         self.is_ood = True

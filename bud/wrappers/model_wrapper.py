@@ -98,3 +98,7 @@ class PosteriorWrapper(ModelWrapper):
 
 class SpecialWrapper(ModelWrapper):
     pass
+
+
+class DirichletWrapper(PosteriorWrapper):
+    pass

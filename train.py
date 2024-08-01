@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-""" ImageNet, CIFAR Training Script
+"""ImageNet, CIFAR Training Script
 
 This is intended to be a lean and easily modifiable ImageNet and CIFAR training script
 that reproduces ImageNet and CIFAR training results with some of the latest networks and
@@ -16,16 +16,17 @@ NVIDIA CUDA specific speedups adopted from NVIDIA Apex examples
 Hacked together by / Copyright 2020 Ross Wightman (https://github.com/rwightman)
                            and 2024 Bálint Mucsányi (https://github.com/bmucsanyi)
 """
+
 import argparse
 import logging
 import os
 import time
 from collections import OrderedDict
 from contextlib import suppress
-from copy import deepcopy
 from datetime import datetime
 from functools import partial
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -50,6 +51,8 @@ from bud.losses import (
     BMACrossEntropyLoss,
     CorrectnessPredictionLoss,
     DUQLoss,
+    EDLLoss,
+    RegularizedUCELoss,
     FBarCrossEntropyLoss,
     JsdCrossEntropyLoss,
     LabelSmoothingCrossEntropyLoss,
@@ -76,6 +79,7 @@ from bud.wrappers import (
     MCInfoNCEWrapper,
     NonIsotropicvMFWrapper,
     SNGPWrapper,
+    PostNetWrapper,
 )
 from validate import evaluate, evaluate_bulk
 
@@ -106,7 +110,7 @@ try:
     from functorch.compile import memory_efficient_fusion
 
     has_functorch = True
-except ImportError as e:
+except ImportError:
     has_functorch = False
 
 has_compile = hasattr(torch, "compile")
@@ -382,7 +386,16 @@ group.add_argument(
     "--num-mc-samples",
     default=10,
     type=int,
-    help="number of Monte Carlo samples in the uncertainty method (default: False)",
+    help="number of Monte Carlo samples in the uncertainty method (default: 10)",
+)
+group.add_argument(
+    "--num-mc-samples-cv",
+    default=50,
+    type=int,
+    help=(
+        "number of Monte Carlo samples in the prior precision CV of the Laplace method "
+        "(default: 50)"
+    ),
 )
 group.add_argument(
     "--rbf-length-scale",
@@ -396,7 +409,7 @@ group.add_argument(
     type=float,
     help=(
         "momentum factor for the exponential moving average in the DUQ method "
-        "(default: 0.1)"
+        "(default: 0.999)"
     ),
 )
 group.add_argument(
@@ -409,7 +422,13 @@ group.add_argument(
     "--matrix-rank",
     default=6,
     type=int,
-    help=("rank of low-rank covariance matrix part in the HET-XL method (default: 6)"),
+    help="rank of low-rank covariance matrix part in the HET-XL method (default: 6)",
+)
+group.add_argument(
+    "--is-het",
+    action="store_true",
+    default=False,
+    help="whether to use HET instead of HET-XL (default: False)",
 )
 group.add_argument(
     "--temperature",
@@ -440,6 +459,12 @@ group.add_argument(
     default="kron",
     type=str,
     help='Hessian structure method used by Laplace (default: "kron")',
+)
+group.add_argument(
+    "--link-approx",
+    default="probit",
+    type=str,
+    help='link approximation used by Laplace (default: "probit")',
 )
 group.add_argument(
     "--magnitude",
@@ -490,10 +515,16 @@ group.add_argument(
     help="bound of the spectral norm in the SNGP method (default: 1)",
 )
 group.add_argument(
-    "--sngp-version",
-    default="original",
-    type=str,
-    help="SNGP version to use (original/google/due) (default: original)",
+    "--is-batch-norm-spectral-normalized",
+    action="store_true",
+    default=False,
+    help="whether to use spectral normalization in batch norm (default: False)",
+)
+group.add_argument(
+    "--use-tight-norm-for-pointwise-convs",
+    action="store_true",
+    default=False,
+    help="whether to use fully connected spectral normalization for pointwise convs (default: False)",
 )
 group.add_argument(
     "--num-random-features",
@@ -543,6 +574,24 @@ group.add_argument(
     default=128,
     type=int,
     help="input dimension to the GP (if > 0, use random projection) (default: 128)",
+)
+group.add_argument(
+    "--postnet-latent-dim",
+    default=6,
+    type=int,
+    help="latent dimensionality in PostNet (default: 6)",
+)
+group.add_argument(
+    "--postnet-num-density-components",
+    default=6,
+    type=int,
+    help="number of density components in PostNet's flow (default: 6)",
+)
+group.add_argument(
+    "--postnet-is-batched",
+    action="store_true",
+    default=False,
+    help=("whether the flow in PostNet is batched (default: False)"),
 )
 group.add_argument(
     "--is-reset-classifier",
@@ -1017,12 +1066,14 @@ group.add_argument(
     metavar="N",
     help="epochs to warmup LR, if scheduler supports (default: 0)",
 )
-group.add_argument(
-    "--warmup-prefix",
-    action="store_true",
-    default=False,
-    help="exclude warmup period from decay schedule (default: False)",
-),
+(
+    group.add_argument(
+        "--warmup-prefix",
+        action="store_true",
+        default=False,
+        help="exclude warmup period from decay schedule (default: False)",
+    ),
+)
 group.add_argument(
     "--cooldown-epochs",
     type=int,
@@ -1090,13 +1141,15 @@ group.add_argument(
     metavar="PCT",
     help="color jitter factor (default: 0.4)",
 )
-group.add_argument(
-    "--aa",
-    type=str,
-    default=None,
-    metavar="NAME",
-    help='use AutoAugment policy ("v0", "original") (default: None)',
-),
+(
+    group.add_argument(
+        "--aa",
+        type=str,
+        default=None,
+        metavar="NAME",
+        help='use AutoAugment policy ("v0", "original") (default: None)',
+    ),
+)
 group.add_argument(
     "--aug-repeats",
     type=float,
@@ -1239,6 +1292,30 @@ group.add_argument(
     default=None,
     metavar="PCT",
     help="drop block rate (default: None)",
+)
+group.add_argument(
+    "--uce-regularization-factor",
+    type=float,
+    default=1e-5,
+    help="UCE regularization factor for PostNets (default: 1e-5)",
+)
+group.add_argument(
+    "--edl-start-epoch",
+    type=int,
+    default=1,
+    help="start epoch for the EDL flatness regularizer (default: 1)",
+)
+group.add_argument(
+    "--edl-scaler",
+    type=float,
+    default=1,
+    help="scaler for the EDL flatness regularizer (default: 1)",
+)
+group.add_argument(
+    "--edl-activation",
+    type=str,
+    default="exp",
+    help='EDL final activation function (default: "exp")',
 )
 
 # Batch norm parameters (only works with gen_efficientnet based models currently)
@@ -1403,6 +1480,15 @@ group.add_argument(
     default=False,
     help="whether eval-metric is decreasing (default: False)",
 )
+group.add_argument(
+    "--best-save-start-epoch",
+    type=int,
+    default=0,
+    help=(
+        "epoch index from which best model according to eval metric is saved "
+        "(default: 0)"
+    ),
+)
 group.add_argument("--local-rank", default=0, type=int)
 group.add_argument(
     "--use-multi-epochs-loader",
@@ -1550,21 +1636,25 @@ def main():
         dropout_probability=args.dropout_probability,
         is_filterwise_dropout=args.is_filterwise_dropout,
         num_mc_samples=args.num_mc_samples,
+        num_mc_samples_cv=args.num_mc_samples_cv,
         rbf_length_scale=args.rbf_length_scale,
         ema_momentum=args.ema_momentum,
         matrix_rank=args.matrix_rank,
+        is_het=args.is_het,
         temperature=args.temperature,
         is_last_layer_laplace=args.is_last_layer_laplace,
         pred_type=args.pred_type,
         prior_optimization_method=args.prior_optimization_method,
         hessian_structure=args.hessian_structure,
+        link_approx=args.link_approx,
         magnitude=args.magnitude,
         initial_average_kappa=args.initial_average_kappa,
         num_heads=args.num_heads,
         is_spectral_normalized=args.is_spectral_normalized,
         spectral_normalization_iteration=args.spectral_normalization_iteration,
         spectral_normalization_bound=args.spectral_normalization_bound,
-        sngp_version=args.sngp_version,
+        is_batch_norm_spectral_normalized=args.is_batch_norm_spectral_normalized,
+        use_tight_norm_for_pointwise_convs=args.use_tight_norm_for_pointwise_convs,
         num_random_features=args.num_random_features,
         gp_kernel_scale=args.gp_kernel_scale,
         gp_output_bias=args.gp_output_bias,
@@ -1573,6 +1663,10 @@ def main():
         gp_cov_momentum=args.gp_cov_momentum,
         gp_cov_ridge_penalty=args.gp_cov_ridge_penalty,
         gp_input_dim=args.gp_input_dim,
+        postnet_latent_dim=args.postnet_latent_dim,
+        postnet_num_density_components=args.postnet_num_density_components,
+        postnet_is_batched=args.postnet_is_batched,
+        edl_activation=args.edl_activation,
         use_pretrained=args.use_pretrained,
         checkpoint_path=args.initial_checkpoint,
         in_chans=in_chans,
@@ -1585,6 +1679,7 @@ def main():
         bn_eps=args.bn_eps,
         **args.model_kwargs,
     )
+    logger.info(str(model))
 
     if args.num_classes is None:
         assert hasattr(
@@ -1737,8 +1832,8 @@ def main():
             "A version of torch w/ torch.compile() is required for --compile, possibly "
             "a nightly."
         )
-        model = torch.compile(model, backend=args.torchcompile)
-
+        # model = torch.compile(model, backend=args.torchcompile)
+        model.model = torch.compile(model.model)
     # Create the train dataset
     dataset_train = create_dataset(
         name=args.dataset,
@@ -1781,7 +1876,14 @@ def main():
         batch_size=args.batch_size,
         is_training=False,
     )
-    dataset_id_eval_hard.target_transform = lambda target: target.argmax(-1)
+
+    def hard_target_transform(target):
+        if isinstance(target, (np.ndarray, torch.Tensor)):  # Soft dataset
+            return target[-1]  # Last entry contains hard label
+
+        return target
+
+    dataset_id_eval_hard.target_transform = hard_target_transform
 
     if args.ood_transforms_eval:
         dataset_locations_ood_eval = {}
@@ -1927,6 +2029,9 @@ def main():
             prepare_n_crop_transform if args.method == "mcinfonce" else None
         ),
     )
+
+    if isinstance(model, PostNetWrapper):
+        model.calculate_sample_counts(loader_train)
 
     loader_id_eval = create_loader(
         dataset_id_eval,
@@ -2094,14 +2199,28 @@ def main():
         train_loss_fn = LossPredictionLoss(
             args.lambda_uncertainty_loss, args.is_detach, args.freeze_backbone
         )
+    elif args.loss == "edl":
+        train_loss_fn = EDLLoss(
+            num_batches=len(loader_train),
+            num_classes=args.num_classes,
+            start_epoch=args.edl_start_epoch,
+            scaler=args.edl_scaler,
+        )
+    elif args.loss == "uce":
+        train_loss_fn = RegularizedUCELoss(
+            regularization_factor=args.uce_regularization_factor
+        )
     else:
         raise NotImplementedError(f"--loss {args.loss} is not implemented.")
     train_loss_fn = train_loss_fn.to(device=device)
 
     # Setup checkpoint saver and eval metric tracking
     eval_metric = args.eval_metric
+
+    assert eval_metric.startswith("id_eval_") and eval_metric.endswith("_auroc_hard_bma_correctness")
+
     best_metric = None
-    best_eval_metric = 0
+    best_eval_metric = float("inf") if args.decreasing else -float("inf")
     best_eval_metrics = None
     best_test_metrics = None
     best_epoch = None
@@ -2114,7 +2233,7 @@ def main():
         else:
             exp_name = "-".join(
                 [
-                    datetime.now().strftime("%Y%m%d-%H%M%S"),
+                    datetime.now().strftime("%Y%m%d-%H%M%S-%f"),
                     safe_model_name(args.model),
                     str(data_config["input_size"][-1]),
                 ]
@@ -2122,6 +2241,9 @@ def main():
         output_dir = utils.get_outdir(
             args.output if args.output else "./output/train", exp_name
         )
+
+        logger.info(f"Output directory is {output_dir}")
+
         decreasing = args.decreasing
         saver = utils.CheckpointSaver(
             model=model,
@@ -2191,9 +2313,39 @@ def main():
                     loss_scaler=loss_scaler,
                     mixup_fn=mixup_fn,
                 )
+
+                eval_metrics = evaluate(
+                    model=model,
+                    loader=loader_id_eval,
+                    device=device,
+                    amp_autocast=amp_autocast,
+                    key_prefix="id_eval",
+                    temp_folder=output_dir,
+                    is_same_task=True,
+                    is_upstream=True,
+                    args=args,
+                )
+
+                logger.info(f"{eval_metric}: {eval_metrics[eval_metric]}")
+
+                is_new_best = (args.lr == 0 and epoch == 0) or (
+                    epoch >= args.best_save_start_epoch
+                    and (
+                        (decreasing and eval_metrics[eval_metric] < best_eval_metric)
+                        or (
+                            (not decreasing)
+                            and eval_metrics[eval_metric] > best_eval_metric
+                        )
+                    )
+                )
+
+                if is_new_best:
+                    best_eval_metric = eval_metrics[eval_metric]
+                    best_eval_metrics = eval_metrics
             elif args.lr == 0 and epoch == 0:  # Post-hoc method
                 logger.info("Learning rate is 0, skipping training epoch.")
                 train_metrics = None
+                eval_metrics = None
             elif args.lr > 0 and epoch == num_epochs and args.is_evaluate_on_test_sets:
                 best_save_path = os.path.join(
                     saver.checkpoint_dir, "model_best" + saver.extension
@@ -2201,6 +2353,8 @@ def main():
                 checkpoint = torch.load(best_save_path, map_location="cpu")
                 state_dict = checkpoint["state_dict"]
                 model.load_state_dict(state_dict, strict=True)
+                train_metrics = None
+                eval_metrics = None
             else:
                 break
 
@@ -2209,7 +2363,9 @@ def main():
                     logger.info("Distributing BatchNorm running means and vars")
                 utils.distribute_bn(model, args.world_size, args.dist_bn == "reduce")
 
-            if args.ood_transforms_eval:
+            if args.is_evaluate_on_test_sets and (
+                (args.lr > 0 and epoch == num_epochs) or (args.lr == 0 and epoch == 0)
+            ):
                 update_post_hoc_method(
                     model,
                     loader_train,
@@ -2218,33 +2374,6 @@ def main():
                     args,
                 )
 
-            eval_metrics = evaluate(
-                model=model,
-                loader=loader_id_eval,
-                device=device,
-                amp_autocast=amp_autocast,
-                key_prefix=f"id_eval",
-                temp_folder=output_dir,
-                is_same_task=True,
-                is_upstream=True,
-                args=args,
-            )
-
-            logger.info(f"{eval_metric}: {eval_metrics[eval_metric]}")
-
-            is_new_best = (
-                epoch == start_epoch
-                or (decreasing and eval_metrics[eval_metric] < best_eval_metric)
-                or ((not decreasing) and eval_metrics[eval_metric] > best_eval_metric)
-            )
-
-            if is_new_best:
-                best_eval_metric = eval_metrics[eval_metric]
-                best_eval_metrics = eval_metrics
-
-            if args.is_evaluate_on_test_sets and (
-                (args.lr > 0 and epoch == num_epochs) or (args.lr == 0 and epoch == 0)
-            ):
                 model.eval()
 
                 if isinstance(model, DDUWrapper):
@@ -2263,7 +2392,7 @@ def main():
                     loader=loader_id_test,
                     device=device,
                     amp_autocast=amp_autocast,
-                    key_prefix=f"id_test",
+                    key_prefix="id_test",
                     temp_folder=output_dir,
                     is_same_task=True,
                     is_upstream=True,
@@ -2314,14 +2443,17 @@ def main():
                     log_wandb=args.log_wandb and has_wandb,
                 )
 
-            if saver is not None and epoch < num_epochs:
+            if (
+                saver is not None
+                and eval_metrics is not None
+            ):
                 # Save proper checkpoint with eval metric
                 save_metric = eval_metrics[eval_metric]
                 best_metric, best_epoch = saver.save_checkpoint(
                     epoch, metric=save_metric
                 )
 
-            if lr_scheduler is not None and num_epochs > 1:
+            if lr_scheduler is not None and eval_metrics is not None:
                 # Step LR for next epoch
                 lr_scheduler.step(epoch + 1, eval_metrics[eval_metric])
 

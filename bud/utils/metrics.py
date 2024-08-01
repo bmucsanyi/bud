@@ -1,11 +1,10 @@
-""" Eval metrics and related
+"""Eval metrics and related
 
 Hacked together by / Copyright 2020 Ross Wightman
                            and 2024 Bálint Mucsányi
 """
 
 import faiss
-import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
 from sklearn.preprocessing import normalize
@@ -200,7 +199,112 @@ def calibration_error(
     return score
 
 
+def area_under_lift_curve(
+    uncertainties: Tensor, correctnesses: Tensor, reverse_sort: bool = False
+) -> Tensor:
+    correctnesses = correctnesses.float()
+    batch_size = correctnesses.shape[0]
+
+    if reverse_sort:
+        sorted_idx = torch.argsort(
+            uncertainties, descending=True
+        )  # Most uncertain indices first
+    else:
+        sorted_idx = torch.argsort(uncertainties)  # Most certain indices first
+
+    sorted_correctnesses = correctnesses[sorted_idx]
+    lift = torch.zeros((batch_size,), dtype=torch.float32)
+    accuracy = correctnesses.mean()
+    lift[0] = sorted_correctnesses[0] / accuracy
+
+    for i in range(1, batch_size):
+        lift[i] = (i * lift[i - 1] + sorted_correctnesses[i] / accuracy) / (i + 1)
+
+    step = 1 / batch_size
+
+    return lift.sum() * step - 1
+
+
+def relative_area_under_lift_curve(
+    uncertainties: Tensor, correctnesses: Tensor
+) -> Tensor:
+    area = area_under_lift_curve(uncertainties, correctnesses)
+    area_opt = area_under_lift_curve(correctnesses, correctnesses, reverse_sort=True)
+
+    return area / area_opt
+
+
+def dempster_shafer_metric(logits: Tensor) -> Tensor:
+    num_classes = logits.shape[-1]
+    belief_mass = logits.exp().sum(dim=-1)  # [B]
+    dempster_shafer_value = num_classes / (belief_mass + num_classes)
+
+    return dempster_shafer_value
+
+
 def centered_cov(x):
     n = x.shape[0]
 
     return 1 / (n - 1) * x.T @ x
+
+
+# https://github.com/IdoGalil/benchmarking-uncertainty-estimation-performance/blob/main/utils/uncertainty_metrics.py
+
+
+def area_under_risk_coverage_curve(
+    uncertainties: Tensor, correctnesses: Tensor
+) -> Tensor:
+    sorted_indices = torch.argsort(uncertainties)
+    correctnesses = correctnesses[sorted_indices]
+    total_samples = uncertainties.shape[0]
+    aurc = torch.tensor(0.0)
+    incorrect_num = 0
+
+    for i in range(total_samples):
+        incorrect_num += 1 - correctnesses[i]
+        aurc += incorrect_num / (i + 1)
+
+    aurc = aurc / total_samples
+
+    return aurc
+
+
+def excess_area_under_risk_coverage_curve(
+    uncertainties: Tensor, correctnesses: Tensor
+) -> Tensor:
+    aurc = area_under_risk_coverage_curve(uncertainties, correctnesses)
+
+    accuracy = correctnesses.float().mean()
+    risk = 1 - accuracy
+    # From https://arxiv.org/abs/1805.08206 :
+    optimal_aurc = risk + (1 - risk) * torch.log(1 - risk)
+
+    return aurc - optimal_aurc
+
+
+def coverage_for_accuracy(
+    uncertainties: Tensor,
+    correctnesses: Tensor,
+    accuracy: float = 0.95,
+    start_index: int = 200,
+) -> Tensor:
+    sorted_indices = torch.argsort(uncertainties)
+    correctnesses = correctnesses[sorted_indices]
+
+    cumsum_correctnesses = torch.cumsum(correctnesses, dim=0)
+    num_samples = cumsum_correctnesses.shape[0]
+    cummean_correctnesses = cumsum_correctnesses / torch.arange(1, num_samples + 1)
+    coverage_for_accuracy = torch.argmax((cummean_correctnesses < accuracy).float())
+
+    # To ignore statistical noise, start measuring at an index greater than 0
+    coverage_for_accuracy_nonstrict = (
+        torch.argmax((cummean_correctnesses[start_index:] < accuracy).float())
+        + start_index
+    )
+    if coverage_for_accuracy_nonstrict > start_index:
+        # If they were the same, even the first non-noisy measurement didn't satisfy the risk, so its coverage is undue,
+        # use the original index. Otherwise, use the non-strict to diffuse noisiness.
+        coverage_for_accuracy = coverage_for_accuracy_nonstrict
+
+    coverage_for_accuracy = coverage_for_accuracy / num_samples
+    return coverage_for_accuracy

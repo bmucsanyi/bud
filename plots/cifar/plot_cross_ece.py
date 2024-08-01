@@ -16,8 +16,8 @@ from utils import (
 
 from tueplots import bundles
 
-config = bundles.icml2022(family="serif", usetex=True, nrows=1, column="half")
-config["figure.figsize"] = (3.25, 1.25)
+config = bundles.icml2024(family="serif", column="half", usetex=True)
+config["figure.figsize"] = (3.25, 0.98)
 
 plt.rcParams.update(config)
 
@@ -32,10 +32,15 @@ def main():
     api = wandb.Api()
 
     id_to_method = {
-        "2vkuhe38": r"GP $\approx$ SNGP",
-        "ymq2jv64": "Deep Ensemble",
-        "9jztoaos": "Dropout",
-        "gypg5gc8": "Baseline",
+        # "2vkuhe38": "GP",
+        # "f32n7c05": "SNGP",
+        # "ymq2jv64": "Deep Ensemble",
+        # "9jztoaos": "MC-Dropout",
+        # "gypg5gc8": "CE Baseline",
+        "wl683ek8": "GP",
+        "ymq2jv64": "Deep Ens.",
+        "n85ctsck": "Temperature",
+        "gypg5gc8": "CE Baseline",
     }
 
     dataset_conversion_dict = {
@@ -48,7 +53,7 @@ def main():
     }
 
     create_directory("results")
-    create_directory(f"results/ece_generalization")
+    create_directory("results/ece_generalization")
 
     _, ax = plt.subplots()
 
@@ -158,12 +163,12 @@ def main():
     ax.spines[["right", "top"]].set_visible(False)
     ax.set_ylabel(r"ECE $\downarrow$")
     ax.set_ylim([0, 0.1])
-    ax.legend(frameon=False)
+    ax.legend(frameon=False, ncols=1, fontsize="xx-small")
 
     ax.set_xticks(np.arange(2))
     ax.set_xticklabels(["ID", "OOD Severity 1"])
     ax.grid(axis="y", zorder=1, linewidth=0.5)
-    save_path = f"results/ece_generalization/ece.pdf"
+    save_path = "results/ece_generalization/ece.pdf"
     plt.savefig(save_path)
     plt.clf()
 
