@@ -72,9 +72,10 @@ def evaluate_bulk(
     device,
     amp_autocast,
     key_prefix,
-    temp_folder,
+    output_dir,
     is_same_task,
     is_upstream,
+    is_test,
     args,
 ):
     metrics = {}
@@ -83,12 +84,14 @@ def evaluate_bulk(
         metrics[name] = evaluate(
             model=model,
             loader=loader,
+            loader_name=name,
             device=device,
             amp_autocast=amp_autocast,
             key_prefix="",
-            temp_folder=temp_folder,
+            output_dir=output_dir,
             is_same_task=is_same_task,
             is_upstream=is_upstream,
+            is_test=is_test,
             args=args,
         )
 
@@ -125,12 +128,14 @@ def add_average_and_flatten(results, key_prefix):
 def evaluate(
     model,
     loader,
+    loader_name,
     device,
     amp_autocast,
     key_prefix,
-    temp_folder,
+    output_dir,
     is_same_task,
     is_upstream,
+    is_test,
     args,
 ):
     model.eval()
@@ -142,7 +147,6 @@ def evaluate(
 
     label_shape = next(iter(loader))[1].shape
     is_soft_labels = len(label_shape) == 2
-    is_test = "eval" not in key_prefix
 
     # TODO: redesign get_bundle s.t. only the eval_metric's ingredients are collected
     # when doing eval
@@ -159,6 +163,9 @@ def evaluate(
     metrics = times
 
     if is_test:
+        ood_prefix = "id" if is_upstream else "ood"
+        save_prefix = f"{ood_prefix}_test_{loader_name}_"
+
         metrics = evaluate_on_tasks(
             model=model,
             estimates=estimates,
@@ -167,6 +174,8 @@ def evaluate(
             metrics=metrics,
             is_same_task=is_same_task,
             is_soft_labels=is_soft_labels,
+            save_prefix=save_prefix,
+            output_dir=output_dir,
             args=args,
         )
     else:
@@ -177,7 +186,7 @@ def evaluate(
             args=args,
         )
 
-    if is_upstream and is_test and temp_folder is not None:
+    if is_upstream and is_test and output_dir is not None:
         # Save ingredients to disk
         max_num_indices = len(targets["gt_zero_shot_correctnesses"])
         num_indices = min(max_num_indices, args.max_num_id_ood_eval_samples // 2)
@@ -197,10 +206,10 @@ def evaluate(
         if not isinstance(model, MCInfoNCEWrapper):
             upstream_dict["upstream_log_probs"] = filter_entries(log_probs, indices)
 
-        torch.save(upstream_dict, f"{temp_folder}/upstream_dict.pt")
-    elif is_test and temp_folder is not None:
+        torch.save(upstream_dict, f"{output_dir}/upstream_dict.pt")
+    elif is_test and output_dir is not None:
         # Load ingredients from disk
-        upstream_dict = torch.load(f"{temp_folder}/upstream_dict.pt")
+        upstream_dict = torch.load(f"{output_dir}/upstream_dict.pt")
         upstream_estimates = upstream_dict["upstream_estimates"]
 
         if not isinstance(model, MCInfoNCEWrapper):
@@ -343,6 +352,9 @@ def evaluate(
                     ]
                 )
 
+        ood_prefix = "id" if is_upstream else "ood"
+        save_prefix = f"{ood_prefix}_test_{loader_name}_mixed_{args.dataset_id}_"
+
         metrics = evaluate_on_tasks(
             model=model,
             estimates=mixed_estimates,
@@ -351,6 +363,8 @@ def evaluate(
             metrics=metrics,
             is_same_task=is_same_task,
             is_soft_labels=is_soft_labels,
+            save_prefix=save_prefix,
+            output_dir=output_dir,
             args=args,
             upstream_is_soft_labels=upstream_is_soft_labels,
         )
@@ -422,6 +436,8 @@ def evaluate_on_tasks(
     metrics,
     is_same_task,
     is_soft_labels,
+    save_prefix,
+    output_dir,
     args,
     upstream_is_soft_labels=None,
 ):
@@ -474,7 +490,10 @@ def evaluate_on_tasks(
         upstream_is_soft_labels=upstream_is_soft_labels,
     )
     metrics |= evaluate_on_correlation_of_estimators(
+        model=model,
         estimates=estimates,
+        output_dir=output_dir,
+        save_prefix=save_prefix,
         args=args,
         upstream_is_soft_labels=upstream_is_soft_labels,
     )
@@ -484,6 +503,8 @@ def evaluate_on_tasks(
         targets=targets,
         is_same_task=is_same_task,
         is_soft_labels=is_soft_labels,
+        output_dir=output_dir,
+        save_prefix=save_prefix,
         args=args,
         upstream_is_soft_labels=upstream_is_soft_labels,
     )
@@ -541,7 +562,7 @@ def evaluate_on_correctness_of_prediction(
 
     for estimator_name in estimates:
         # In `estimates`, we have *uncertainty* estimates: higher signals more uncertain.
-        # For correctness of prediction, we need *certainty* estimates: the AUROC is high
+        # For correctness prediction, we need *certainty* estimates: the AUROC is high
         # if there exists a threshold for which all certain samples are correct (1)
         # and all others are incorrect (0).
 
@@ -1814,6 +1835,8 @@ def evaluate_on_bregman(
 def evaluate_on_correlation_of_estimators(
     model,
     estimates,
+    output_dir,
+    save_prefix,
     args,
     upstream_is_soft_labels,
 ):
@@ -1826,6 +1849,10 @@ def evaluate_on_correlation_of_estimators(
         ddu_aleatoric = estimates["expected_entropies"]
         ddu_epistemic = estimates["gmm_neg_log_densities"]
 
+        torch.save(
+            (ddu_aleatoric, ddu_epistemic), f"{output_dir}/{save_prefix}ddu_au_eu.pt"
+        )
+
         metrics[f"{key_prefix}correlation_ddu_au_eu"] = float(
             pearsonr(ddu_aleatoric, ddu_epistemic)[0]
         )
@@ -1835,6 +1862,11 @@ def evaluate_on_correlation_of_estimators(
     elif isinstance(model, MahalanobisWrapper):
         mahalanobis_aleatoric = estimates["expected_entropies"]
         mahalanobis_epistemic = estimates["mahalanobis_values"]
+
+        torch.save(
+            (mahalanobis_aleatoric, mahalanobis_epistemic),
+            f"{output_dir}/{save_prefix}mahalanobis_au_eu.pt",
+        )
 
         metrics[f"{key_prefix}correlation_mahalanobis_au_eu"] = float(
             pearsonr(mahalanobis_aleatoric, mahalanobis_epistemic)[0]
@@ -1849,11 +1881,21 @@ def evaluate_on_correlation_of_estimators(
         kendall_gal_epistemic_prob = estimates["expected_variances_of_probs"]
         kendall_gal_epistemic_logit = estimates["expected_variances_of_logits"]
 
+        torch.save(
+            (kendall_gal_aleatoric, kendall_gal_epistemic_prob),
+            f"{output_dir}/{save_prefix}kendall_gal_au_eu_prob.pt",
+        )
+
         metrics[f"{key_prefix}correlation_kendall_gal_au_eu_prob"] = float(
             pearsonr(kendall_gal_aleatoric, kendall_gal_epistemic_prob)[0]
         )
         metrics[f"{key_prefix}rank_correlation_kendall_gal_au_eu_prob"] = float(
             spearmanr(kendall_gal_aleatoric, kendall_gal_epistemic_prob)[0]
+        )
+
+        torch.save(
+            (kendall_gal_aleatoric, kendall_gal_epistemic_logit),
+            f"{output_dir}/{save_prefix}kendall_gal_au_eu_logit.pt",
         )
 
         metrics[f"{key_prefix}correlation_kendall_gal_au_eu_logit"] = float(
@@ -1873,6 +1915,11 @@ def evaluate_on_correlation_of_estimators(
             "expected_variances_of_internal_logits"
         ]
 
+        torch.save(
+            (kendall_gal_aleatoric, kendall_gal_epistemic_internal_prob),
+            f"{output_dir}/{save_prefix}kendall_gal_au_eu_internal_prob.pt",
+        )
+
         metrics[f"{key_prefix}correlation_kendall_gal_au_eu_internal_prob"] = float(
             pearsonr(kendall_gal_aleatoric, kendall_gal_epistemic_internal_prob)[0]
         )
@@ -1880,6 +1927,11 @@ def evaluate_on_correlation_of_estimators(
             f"{key_prefix}rank_correlation_kendall_gal_au_eu_internal_prob"
         ] = float(
             spearmanr(kendall_gal_aleatoric, kendall_gal_epistemic_internal_prob)[0]
+        )
+
+        torch.save(
+            (kendall_gal_aleatoric, kendall_gal_epistemic_internal_logit),
+            f"{output_dir}/{save_prefix}kendall_gal_au_eu_internal_logit.pt",
         )
 
         metrics[f"{key_prefix}correlation_kendall_gal_au_eu_internal_logit"] = float(
@@ -1900,6 +1952,8 @@ def evaluate_on_correlation_of_decompositions(
     targets,
     is_same_task,
     is_soft_labels,
+    output_dir,
+    save_prefix,
     args,
     upstream_is_soft_labels,
 ):
@@ -1920,6 +1974,11 @@ def evaluate_on_correlation_of_decompositions(
         entropies_of_bma = estimates["entropies_of_bma"]
         expected_entropies = estimates["expected_entropies"]
         jensen_shannon_divergences = estimates["jensen_shannon_divergences"]
+
+        torch.save(
+            (expected_entropies, jensen_shannon_divergences),
+            f"{output_dir}/{save_prefix}bma_au_eu.pt",
+        )
 
         metrics[f"{key_prefix}rank_correlation_bma_au_eu"] = float(
             spearmanr(expected_entropies, jensen_shannon_divergences)[0]
@@ -1947,6 +2006,11 @@ def evaluate_on_correlation_of_decompositions(
         expected_entropies_plus_expected_divergences = estimates[
             "expected_entropies_plus_expected_divergences"
         ]
+
+        torch.save(
+            (expected_divergences, expected_entropies),
+            f"{output_dir}/{save_prefix}bregman_eu_au_hat.pt",
+        )
 
         metrics[f"{key_prefix}rank_correlation_bregman_eu_au_hat"] = float(
             spearmanr(expected_divergences, expected_entropies)[0]
@@ -2004,6 +2068,11 @@ def evaluate_on_correlation_of_decompositions(
     can_evaluate_eu_pu = is_same_task
 
     if can_evaluate_au_eu:
+        torch.save(
+            (gt_aleatorics_bregman, gt_epistemics_bregman),
+            f"{output_dir}/{save_prefix}bregman_au_eu.pt",
+        )
+
         metrics[f"{key_prefix}rank_correlation_bregman_au_eu"] = float(
             spearmanr(gt_aleatorics_bregman, gt_epistemics_bregman)[0]
         )

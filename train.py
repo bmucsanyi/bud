@@ -2004,12 +2004,14 @@ def main():
             eval_metrics = evaluate(
                 model=model,
                 loader=loader_id_eval,
+                loader_name=args.dataset_id,
                 device=device,
                 amp_autocast=amp_autocast,
                 key_prefix="id_eval",
-                temp_folder=output_dir,
+                output_dir=output_dir,
                 is_same_task=True,
                 is_upstream=True,
+                is_test=False,
                 args=args,
             )
 
@@ -2123,12 +2125,14 @@ def evaluate_on_test_sets(
     best_test_metrics = evaluate(
         model=model,
         loader=loader_id_test,
+        loader_name=args.dataset_id,
         device=device,
         amp_autocast=amp_autocast,
         key_prefix="id_test",
-        temp_folder=output_dir,
+        output_dir=output_dir,
         is_same_task=True,
         is_upstream=True,
+        is_test=True,
         args=args,
     )
 
@@ -2138,9 +2142,10 @@ def evaluate_on_test_sets(
         device=device,
         amp_autocast=amp_autocast,
         key_prefix="ood_test",
-        temp_folder=output_dir,
+        output_dir=output_dir,
         is_same_task=True,
         is_upstream=False,
+        is_test=True,
         args=args,
     )
 
@@ -2152,9 +2157,10 @@ def evaluate_on_test_sets(
                 device=device,
                 amp_autocast=amp_autocast,
                 key_prefix="zero_shot_test",
-                temp_folder=output_dir,
+                output_dir=output_dir,
                 is_same_task=False,
                 is_upstream=False,
+                is_test=True,
                 args=args,
             )
         )
