@@ -103,7 +103,10 @@ class HetClassNNWrapper(PosteriorWrapper):
         stds = variances.sqrt()  # [B, C]
 
         logit_mc_samples = logits.unsqueeze(1) + stds.unsqueeze(1) * torch.randn(
-            inputs.shape[0], self.num_integral_mc_samples, self.model.num_classes
+            inputs.shape[0],
+            self.num_integral_mc_samples,
+            self.model.num_classes,
+            device=logits.device,
         )  # [B, S', C]
 
         if return_bundle:
