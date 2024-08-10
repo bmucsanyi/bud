@@ -7,6 +7,7 @@ Hacked together by / Copyright 2021 Ross Wightman
 import os
 
 import torch
+from torch.utils.data import Dataset
 
 from torchvision.datasets import (
     CIFAR10,
@@ -252,6 +253,51 @@ def create_dataset(
         )
         subset_size = int(subset * num_samples)
         subset_indices = indices[:subset_size]
-        ds = torch.utils.data.Subset(ds, subset_indices)
+        ds = Subset(ds, subset_indices)
 
     return ds
+
+
+class Subset(Dataset):
+    """Subset of a dataset at specified indices. Adapted from torch.utils.
+
+    Args:
+        dataset (Dataset): The whole Dataset
+        indices (sequence): Indices in the whole set selected for subset
+    """
+
+    def __init__(self, dataset, indices) -> None:
+        self.dataset = dataset
+        self.indices = indices
+
+    def __getitem__(self, idx):
+        if isinstance(idx, list):
+            return self.dataset[[self.indices[i] for i in idx]]
+        return self.dataset[self.indices[idx]]
+
+    def __getitems__(self, indices):
+        # add batched sampling support when parent dataset supports it.
+        # see torch.utils.data._utils.fetch._MapDatasetFetcher
+        if callable(getattr(self.dataset, "__getitems__", None)):
+            return self.dataset.__getitems__([self.indices[idx] for idx in indices])
+        else:
+            return [self.dataset[self.indices[idx]] for idx in indices]
+
+    def __len__(self):
+        return len(self.indices)
+
+    def __getattr__(self, name: str):
+        if name in {"dataset", "indices"}:
+            return object.__getattribute__(self, name)
+        return getattr(self.dataset, name)
+
+    def __setattr__(self, name: str, value):
+        if name in {"dataset", "indices"}:
+            object.__setattr__(self, name, value)
+        else:
+            setattr(self.dataset, name, value)
+
+    def __hasattr__(self, name: str):
+        if name in {"dataset", "indices"}:
+            return True
+        return hasattr(self.dataset, name)
