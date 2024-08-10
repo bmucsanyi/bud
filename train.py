@@ -289,6 +289,12 @@ group.add_argument(
     help="evaluate model on the provided test sets (default: False)",
 )
 group.add_argument(
+    "--discard-ood-test-sets",
+    action="store_true",
+    default=False,
+    help="do not evaluate model on the provided OOD test sets (default: False)",
+)
+group.add_argument(
     "--test-split-zero-shot",
     metavar="NAME",
     default="test",
@@ -2082,14 +2088,15 @@ def main():
             )
 
             best_test_metrics = evaluate_on_test_sets(
-                model,
-                loader_id_test,
-                loaders_ood_test,
-                loaders_zero_shot_test,
-                device,
-                amp_autocast,
-                output_dir,
-                args,
+                model=model,
+                loader_id_test=loader_id_test,
+                loaders_ood_test=loaders_ood_test,
+                loaders_zero_shot_test=loaders_zero_shot_test,
+                device=device,
+                amp_autocast=amp_autocast,
+                output_dir=output_dir,
+                discard_ood_test_sets=args.discard_ood_test_sets,
+                args=args,
             )
 
             lrs = [param_group["lr"] for param_group in optimizer.param_groups]
@@ -2120,6 +2127,7 @@ def evaluate_on_test_sets(
     device,
     amp_autocast,
     output_dir,
+    discard_ood_test_sets,
     args,
 ):
     best_test_metrics = evaluate(
@@ -2135,6 +2143,9 @@ def evaluate_on_test_sets(
         is_test=True,
         args=args,
     )
+
+    if discard_ood_test_sets:
+        return best_test_metrics
 
     best_test_metrics |= evaluate_bulk(
         model=model,

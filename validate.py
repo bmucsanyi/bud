@@ -441,7 +441,7 @@ def evaluate_on_tasks(
     args,
     upstream_is_soft_labels=None,
 ):
-    metrics |= evaluate_on_correctness_of_prediction(
+    metrics |= evaluate_on_correctness_prediction(
         model=model,
         estimates=estimates,
         targets=targets,
@@ -512,7 +512,7 @@ def evaluate_on_tasks(
     return metrics
 
 
-def evaluate_on_correctness_of_prediction(
+def evaluate_on_correctness_prediction(
     model,
     estimates,
     targets,
@@ -523,7 +523,7 @@ def evaluate_on_correctness_of_prediction(
 ):
     is_mixed = upstream_is_soft_labels is not None
 
-    # For correctness of prediction, one of the datasets being soft is enough
+    # For correctness prediction, one of the datasets being soft is enough
     if is_mixed:
         is_soft_labels = is_soft_labels or upstream_is_soft_labels
 
