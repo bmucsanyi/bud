@@ -16,7 +16,6 @@ from .config import (
     set_fused_attn,
     set_layer_config,
     set_no_jit,
-    set_scriptable,
     use_fused_attn,
 )
 from .conv2d_same import Conv2dSame, conv2d_same

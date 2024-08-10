@@ -13,7 +13,6 @@ __all__ = [
     "set_fused_attn",
     "set_layer_config",
     "set_no_jit",
-    "set_scriptable",
     "use_fused_attn",
 ]
 
@@ -74,21 +73,6 @@ class set_exportable:
     def __exit__(self, *args: Any) -> bool:
         global _EXPORTABLE
         _EXPORTABLE = self.prev
-        return False
-
-
-class set_scriptable:
-    def __init__(self, mode: bool) -> None:
-        global _SCRIPTABLE
-        self.prev = _SCRIPTABLE
-        _SCRIPTABLE = mode
-
-    def __enter__(self) -> None:
-        pass
-
-    def __exit__(self, *args: Any) -> bool:
-        global _SCRIPTABLE
-        _SCRIPTABLE = self.prev
         return False
 
 

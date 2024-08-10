@@ -6,7 +6,7 @@ from typing import Callable, Type, Union
 from .activations import *
 from .activations_jit import *
 from .activations_me import *
-from .config import is_exportable, is_no_jit, is_scriptable
+from .config import is_exportable, is_no_jit
 
 # PyTorch has an optimized, native 'silu' (aka 'swish') operator as of PyTorch 1.7.
 # Also hardsigmoid, hardswish, and soon mish. This code will use native version if present.
@@ -114,8 +114,8 @@ def get_act_fn(name: Union[Callable, str] = "relu"):
         return None
     if isinstance(name, Callable):
         return name
-    if not (is_no_jit() or is_exportable() or is_scriptable()):
-        # If not exporting or scripting the model, first look for a memory-efficient version with
+    if not (is_no_jit() or is_exportable()):
+        # If not exporting the model, first look for a memory-efficient version with
         # custom autograd, then fallback
         if name in _ACT_FN_ME:
             return _ACT_FN_ME[name]
@@ -135,7 +135,7 @@ def get_act_layer(name: Union[Type[nn.Module], str] = "relu"):
     if not isinstance(name, str):
         # callable, module, etc
         return name
-    if not (is_no_jit() or is_exportable() or is_scriptable()):
+    if not (is_no_jit() or is_exportable()):
         if name in _ACT_LAYER_ME:
             return _ACT_LAYER_ME[name]
     if not (is_no_jit() or is_exportable()):

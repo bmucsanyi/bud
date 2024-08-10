@@ -19,11 +19,9 @@ from bud.layers.cond_conv2d import CondConv2d, get_condconv_initializer
 from bud.layers.config import (
     is_exportable,
     is_no_jit,
-    is_scriptable,
     set_exportable,
     set_layer_config,
     set_no_jit,
-    set_scriptable,
 )
 from bud.layers.conv2d_same import Conv2dSame, conv2d_same
 from bud.layers.conv_bn_act import ConvBnAct, ConvNormAct, ConvNormActAa

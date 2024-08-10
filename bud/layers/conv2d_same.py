@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .config import is_exportable, is_scriptable
+from .config import is_exportable
 from .padding import get_padding_value, pad_same, pad_same_arg
 
 _USE_EXPORT_CONV = False
@@ -123,7 +123,6 @@ def create_conv2d_pad(in_chs, out_chs, kernel_size, **kwargs):
     if is_dynamic:
         if _USE_EXPORT_CONV and is_exportable():
             # older PyTorch ver needed this to export same padding reasonably
-            assert not is_scriptable()  # Conv2DSameExport does not work with jit
             return Conv2dSameExport(in_chs, out_chs, kernel_size, **kwargs)
         else:
             return Conv2dSame(in_chs, out_chs, kernel_size, **kwargs)

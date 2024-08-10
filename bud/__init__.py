@@ -1,5 +1,5 @@
 from .version import __version__
-from .layers import is_exportable, is_scriptable, set_exportable, set_scriptable
+from .layers import is_exportable, set_exportable
 from .models import (
     create_model,
     get_pretrained_cfg,
