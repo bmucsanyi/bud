@@ -2211,9 +2211,7 @@ def create_datasets(args, num_aug_splits):
 
     dataset_locations_ood_eval = {}
     for severity in range(1, 6):
-        dataset_locations_ood_eval[f"{args.dataset_id}S{severity}"] = (
-            args.data_dir_id,
-        )
+        dataset_locations_ood_eval[f"{args.dataset_id}S{severity}"] = args.data_dir_id
 
     dataset_locations_ood_test = {}
     for severity in range(1, 6):
