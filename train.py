@@ -209,6 +209,12 @@ group.add_argument(
     ),
 )
 group.add_argument(
+    "--train-subset",
+    type=float,
+    default=1.0,
+    help="Fraction of training set to use (default: 1.0)",
+)
+group.add_argument(
     "--max-num-id-ood-eval-samples",
     default=100000,
     type=int,
@@ -2168,6 +2174,7 @@ def create_datasets(args, num_aug_splits):
         batch_size=args.batch_size,
         seed=args.seed,
         repeats=args.epoch_repeats,
+        subset=args.train_subset,
     )
 
     # Create the eval datasets

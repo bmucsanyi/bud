@@ -1,9 +1,12 @@
-""" Dataset Factory
+"""Dataset Factory
 
 Hacked together by / Copyright 2021 Ross Wightman
                            and 2024 Bálint Mucsányi
 """
+
 import os
+
+import torch
 
 from torchvision.datasets import (
     CIFAR10,
@@ -88,6 +91,7 @@ def create_dataset(
     batch_size=None,
     seed=42,
     repeats=0,
+    subset=1.0,
     **kwargs,
 ):
     """Dataset factory method
@@ -122,6 +126,9 @@ def create_dataset(
     Returns:
         Dataset object
     """
+    if not is_training and subset < 1.0:
+        raise ValueError("Subsetting is only supported for training sets")
+
     name = name.lower()
     if name.startswith("torch/"):
         name = name.split("/", 2)[-1]
@@ -237,4 +244,14 @@ def create_dataset(
         ds = ImageDataset(
             root, reader=name, class_map=class_map, load_bytes=load_bytes, **kwargs
         )
+
+    if subset < 1.0:
+        num_samples = len(ds)
+        indices = torch.randperm(
+            num_samples, generator=torch.Generator().manual_seed(seed)
+        )
+        subset_size = int(subset * num_samples)
+        subset_indices = indices[:subset_size]
+        ds = torch.utils.data.Subset(ds, subset_indices)
+
     return ds
