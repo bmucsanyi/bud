@@ -2868,7 +2868,7 @@ def convert_inference_dict(model, inference_dict, time_forward, args):
             else:
                 converted_inference_dict["expected_variance_of_probs"] = 0
 
-            convert_inference_dict["expected_variance_of_logits"] = 0
+            converted_inference_dict["expected_variance_of_logits"] = 0
 
             expected_max_prob = probs.max(dim=-1)[0].mean(dim=1)
             converted_inference_dict["expected_max_prob"] = expected_max_prob
