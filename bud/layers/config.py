@@ -87,11 +87,10 @@ class set_layer_config:
         no_jit: Optional[bool] = None,
         no_activation_jit: Optional[bool] = None,
     ):
-        global _SCRIPTABLE
         global _EXPORTABLE
         global _NO_JIT
         global _NO_ACTIVATION_JIT
-        self.prev = _SCRIPTABLE, _EXPORTABLE, _NO_JIT, _NO_ACTIVATION_JIT
+        self.prev = _EXPORTABLE, _NO_JIT, _NO_ACTIVATION_JIT
         if exportable is not None:
             _EXPORTABLE = exportable
         if no_jit is not None:
@@ -103,11 +102,10 @@ class set_layer_config:
         pass
 
     def __exit__(self, *args: Any) -> bool:
-        global _SCRIPTABLE
         global _EXPORTABLE
         global _NO_JIT
         global _NO_ACTIVATION_JIT
-        _SCRIPTABLE, _EXPORTABLE, _NO_JIT, _NO_ACTIVATION_JIT = self.prev
+        _EXPORTABLE, _NO_JIT, _NO_ACTIVATION_JIT = self.prev
         return False
 
 
