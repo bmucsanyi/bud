@@ -2650,6 +2650,8 @@ def get_bundle(
                 one_minus_max_probs_of_fbar=one_minus_max_probs_of_fbar,
                 jensen_shannon_divergences=jensen_shannon_divergences,
                 dempster_shafer_values=dempster_shafer_values,
+                expected_variances_of_probs=expected_variances_of_probs,
+                expected_variances_of_logits=expected_variances_of_logits,
             )
 
             # GT containers
@@ -3030,6 +3032,8 @@ def update_logit_based(
     one_minus_max_probs_of_fbar,
     jensen_shannon_divergences,
     dempster_shafer_values,
+    expected_variances_of_probs,
+    expected_variances_of_logits,
 ):
     log_fbars[indices] = inference_dict["log_fbar"]
     log_bmas[indices] = inference_dict["log_bma"]
@@ -3048,6 +3052,8 @@ def update_logit_based(
     one_minus_max_probs_of_fbar[indices] = 1 - inference_dict["max_prob_of_fbar"]
     jensen_shannon_divergences[indices] = inference_dict["jensen_shannon_divergence"]
     dempster_shafer_values[indices] = inference_dict["dempster_shafer_value"]
+    expected_variances_of_probs[indices] = inference_dict["expected_variance_of_probs"]
+    expected_variances_of_logits[indices] = inference_dict["expected_variance_of_logits"]
 
 
 def update_nivmf(
