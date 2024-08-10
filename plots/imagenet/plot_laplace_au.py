@@ -12,7 +12,6 @@ sys.path.insert(0, "..")
 
 from utils import (
     POSTERIOR_ESTIMATORS,
-    GT_LABELS,
     ID_TO_METHOD_IMAGENET,
     DATASET_CONVERSION_DICT_IMAGENET,
     ESTIMATOR_CONVERSION_DICT,
@@ -22,8 +21,8 @@ from utils import (
 from tueplots import bundles
 from matplotlib.ticker import MultipleLocator
 
-config = bundles.icml2024(family="serif", column="half", usetex=True)
-config["figure.figsize"] = (3.25, 0.98)
+config = bundles.neurips2024()
+config["figure.figsize"] = (2.64, 0.9)
 plt.rcParams.update(config)
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
 
@@ -61,7 +60,7 @@ def plot_and_save(suffix, data, save_path):
         ax.text(
             bar.get_x() + bar.get_width() / 2 + 0.05,
             0.03,
-            label,
+            ESTIMATOR_CONVERSION_DICT[label],
             ha="center",
             va="bottom",
             rotation="vertical",
@@ -69,7 +68,7 @@ def plot_and_save(suffix, data, save_path):
             zorder=3,
         )
 
-        if label in GT_LABELS:
+        if "gt" in label:
             bar.set_color(np.array([234.0, 67.0, 53.0]) / 255.0)
         else:
             bar.set_color(np.array([66.0, 103.0, 210.0]) / 255.0)
@@ -100,7 +99,7 @@ def plot_and_save_aggregated(
     best_metric,
     best_metric_mins_maxs,
     save_path,
-    label_offsets,
+    labels_to_offset,
     offset_values,
 ):
     """Plots and saves the aggregated best values with min-max error bars as a PDF."""
@@ -135,7 +134,8 @@ def plot_and_save_aggregated(
         fmt="none",
         ecolor=np.array([105.0, 109.0, 113.0]) / 255.0,
         elinewidth=1,
-        capsize=5,
+        capsize=4,
+        markeredgewidth=0.5,
         zorder=3,
     )
     ax.spines[["right", "top"]].set_visible(False)
@@ -144,7 +144,7 @@ def plot_and_save_aggregated(
     ax.set(xticklabels=[])
     ax.tick_params(bottom=False)
 
-    label_offset_dict = dict(zip(label_offsets, offset_values))
+    label_offset_dict = dict(zip(labels_to_offset, offset_values))
 
     for bar, label in zip(bars, labels):
         if "$" in label:
@@ -156,7 +156,7 @@ def plot_and_save_aggregated(
             processed_label = label
 
         y_offset = label_offset_dict.get(
-            processed_label, 0.03
+            processed_label, 0.01
         )  # Use the offset if available, otherwise default to 0.03
         ax.text(
             bar.get_x() + bar.get_width() / 2,
@@ -201,6 +201,7 @@ def plot_and_save_aggregated(
         loc="upper right",
         fontsize="small",
         handlelength=1,
+        ncol=2,
     )
 
     ax.set_ylim(bottom=0, top=1)
@@ -215,10 +216,7 @@ def main(args):
     wandb.login(key=wandb_key)
     api = wandb.Api()
 
-    def func(x):
-        if isinstance(x, str):
-            return x
-        return abs(x)
+    metric_id = "rank_correlation_bregman_au"
 
     for prefix in DATASET_CONVERSION_DICT_IMAGENET:
         create_directory("results")
@@ -231,15 +229,15 @@ def main(args):
             sweep = api.sweep(f"bmucsanyi/bias/{method_id}")
 
             metric = {}
-            suffix = "rank_correlation_bregman_au"
 
             for run in sweep.runs:
                 if run.state != "finished":
                     continue
+
                 for key in sorted(run.summary.keys()):
-                    if key.startswith(prefix) and key.endswith(suffix):
+                    if key.startswith(prefix) and key.endswith(metric_id):
                         stripped_key = key.replace(f"{prefix}_", "").replace(
-                            f"_{suffix}", ""
+                            f"_{metric_id}", ""
                         )
 
                         if (
@@ -248,14 +246,10 @@ def main(args):
                         ):
                             continue
 
-                        if ESTIMATOR_CONVERSION_DICT[stripped_key] not in metric:
-                            metric[ESTIMATOR_CONVERSION_DICT[stripped_key]] = [
-                                func(run.summary[key])
-                            ]
+                        if stripped_key not in metric:
+                            metric[stripped_key] = [run.summary[key]]
                         else:
-                            metric[ESTIMATOR_CONVERSION_DICT[stripped_key]].append(
-                                func(run.summary[key])
-                            )
+                            metric[stripped_key].append(run.summary[key])
 
             save_path = (
                 f"results/laplace_au/{prefix.replace('/', '-')}/"
@@ -267,61 +261,49 @@ def main(args):
                 continue
 
             plot_and_save(
-                "Rank Correlation",
+                "Rank Corr.",
                 metric,
                 save_path,
             )
 
             if method_name == "Corr. Pred.":
-                aggregated_key = ESTIMATOR_CONVERSION_DICT["error_probabilities"]
+                aggregated_key = "error_probabilities"
             elif method_name == "Loss Pred.":
-                aggregated_key = ESTIMATOR_CONVERSION_DICT["risk_values"]
+                aggregated_key = "risk_values"
             elif method_name == "Mahalanobis":
-                aggregated_key = ESTIMATOR_CONVERSION_DICT["mahalanobis_values"]
+                aggregated_key = "mahalanobis_values"
             elif method_name == "Laplace":
-                aggregated_key = ESTIMATOR_CONVERSION_DICT["expected_entropies"]
+                aggregated_key = "expected_entropies"
             else:
-                aggregated_key = ESTIMATOR_CONVERSION_DICT.get(
-                    args.distributional_estimator
-                )
+                aggregated_key = None
 
             if aggregated_key is None:
-                operator = max
-                means = {
-                    key: np.mean(metric[key]) for key in metric if key not in GT_LABELS
-                }
-                aggregated_key = operator(means.items(), key=lambda x: x[1])[0]
+                means = {key: np.mean(metric[key]) for key in metric if "gt" not in key}
+                aggregated_key = max(means.items(), key=lambda x: x[1])[0]
 
-            try:
-                aggregated_estimators[method_name] = np.mean(metric[aggregated_key])
-                aggregated_estimators_mins_maxs[method_name] = np.min(
-                    metric[aggregated_key]
-                ), np.max(metric[aggregated_key])
-            except KeyError:
-                continue
-
-        if not aggregated_estimators:
-            continue
+            aggregated_estimators[method_name] = np.mean(metric[aggregated_key])
+            aggregated_estimators_mins_maxs[method_name] = np.min(
+                metric[aggregated_key]
+            ), np.max(metric[aggregated_key])
 
         # Save the aggregated plot with min-max error bars
         aggregated_save_path = (
             f"results/laplace_au/{prefix.replace('/', '-')}/aggregated.pdf"
         )
         plot_and_save_aggregated(
-            "Rank Correlation",
+            "Rank Corr.",
             aggregated_estimators,
             aggregated_estimators_mins_maxs,
             aggregated_save_path,
-            args.label_offsets,
+            args.labels_to_offset,
             args.offset_values,
         )
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process the metric for plotting.")
-    parser.add_argument("--distributional-estimator", type=str, default=None)
     parser.add_argument(
-        "--label-offsets",
+        "--labels-to-offset",
         nargs="*",
         default=[],
         help="List of labels that require y-offset adjustments.",

@@ -48,6 +48,7 @@ from bud.wrappers import (
     MCInfoNCEWrapper,
     NonIsotropicvMFWrapper,
     DirichletWrapper,
+    HetClassNNWrapper,
 )
 
 # Ignore constant input warning for correlation coefficients.
@@ -176,7 +177,7 @@ def evaluate(
             args=args,
         )
 
-    if is_upstream and is_test:
+    if is_upstream and is_test and temp_folder is not None:
         # Save ingredients to disk
         max_num_indices = len(targets["gt_zero_shot_correctnesses"])
         num_indices = min(max_num_indices, args.max_num_id_ood_eval_samples // 2)
@@ -197,7 +198,7 @@ def evaluate(
             upstream_dict["upstream_log_probs"] = filter_entries(log_probs, indices)
 
         torch.save(upstream_dict, f"{temp_folder}/upstream_dict.pt")
-    elif is_test:
+    elif is_test and temp_folder is not None:
         # Load ingredients from disk
         upstream_dict = torch.load(f"{temp_folder}/upstream_dict.pt")
         upstream_estimates = upstream_dict["upstream_estimates"]
@@ -394,6 +395,7 @@ def concatenate_values(upstream_dict, downstream_dict, keys_to_exclude=None):
 
     return result
 
+
 def evaluate_on_auroc_hard_bma_correctness(
     estimates,
     targets,
@@ -405,9 +407,7 @@ def evaluate_on_auroc_hard_bma_correctness(
             estimate = -estimates[estimator_name]
 
             gt_hard_bma_correctnesses = targets["gt_hard_bma_correctnesses"]
-            metrics[
-                f"{estimator_name}_auroc_hard_bma_correctness"
-            ] = calculate_auroc(
+            metrics[f"{estimator_name}_auroc_hard_bma_correctness"] = calculate_auroc(
                 estimate, gt_hard_bma_correctnesses, args, soft=False
             ).item()
 
@@ -425,7 +425,6 @@ def evaluate_on_tasks(
     args,
     upstream_is_soft_labels=None,
 ):
-
     metrics |= evaluate_on_correctness_of_prediction(
         model=model,
         estimates=estimates,
@@ -1634,13 +1633,11 @@ def evaluate_on_proper_scoring_and_calibration(
             f"{key_prefix}log_prob_score_hard_fbar_aleatoric"
         ] = multiclass_log_probability(log_probs["log_fbars"], gt_hard_labels).item()
         metrics[
-            f"{key_prefix}{estimator_name}_brier_score_hard_fbar_aleatoric_original"
+            f"{key_prefix}brier_score_hard_fbar_aleatoric_original"
         ] = multiclass_brier(
             log_probs["log_fbars"], gt_hard_labels_original, is_soft_targets=False
         ).item()
-        metrics[
-            f"{key_prefix}{estimator_name}_brier_score_hard_fbar_aleatoric"
-        ] = multiclass_brier(
+        metrics[f"{key_prefix}brier_score_hard_fbar_aleatoric"] = multiclass_brier(
             log_probs["log_fbars"], gt_hard_labels, is_soft_targets=False
         ).item()
 
@@ -1653,11 +1650,11 @@ def evaluate_on_proper_scoring_and_calibration(
             f"{key_prefix}log_prob_score_hard_bma_aleatoric"
         ] = multiclass_log_probability(log_probs["log_bmas"], gt_hard_labels).item()
         metrics[
-            f"{key_prefix}brier_score_hard_fbar_aleatoric_original"
+            f"{key_prefix}brier_score_hard_bma_aleatoric_original"
         ] = multiclass_brier(
             log_probs["log_bmas"], gt_hard_labels_original, is_soft_targets=False
         ).item()
-        metrics[f"{key_prefix}brier_score_hard_fbar_aleatoric"] = multiclass_brier(
+        metrics[f"{key_prefix}brier_score_hard_bma_aleatoric"] = multiclass_brier(
             log_probs["log_bmas"], gt_hard_labels, is_soft_targets=False
         ).item()
 
@@ -1676,7 +1673,7 @@ def evaluate_on_proper_scoring_and_calibration(
             metrics[
                 f"{key_prefix}log_prob_score_soft_bma_aleatoric"
             ] = multiclass_log_probability(log_probs["log_bmas"], gt_soft_labels).item()
-            metrics[f"{key_prefix}brier_score_soft_fbar_aleatoric"] = multiclass_brier(
+            metrics[f"{key_prefix}brier_score_soft_bma_aleatoric"] = multiclass_brier(
                 log_probs["log_bmas"], gt_soft_labels, is_soft_targets=True
             ).item()
 
@@ -1815,6 +1812,7 @@ def evaluate_on_bregman(
 
 
 def evaluate_on_correlation_of_estimators(
+    model,
     estimates,
     args,
     upstream_is_soft_labels,
@@ -1824,16 +1822,74 @@ def evaluate_on_correlation_of_estimators(
     is_mixed = upstream_is_soft_labels is not None
     key_prefix = f"mixed_{args.dataset_id}_" if is_mixed else ""
 
-    for estimator_name_1 in estimates:
-        for estimator_name_2 in estimates:
-            if estimator_name_2 <= estimator_name_1:
-                continue
+    if isinstance(model, DDUWrapper):
+        ddu_aleatoric = estimates["expected_entropies"]
+        ddu_epistemic = estimates["gmm_neg_log_densities"]
 
-            estimate_1 = estimates[estimator_name_1]
-            estimate_2 = estimates[estimator_name_2]
-            metrics[
-                f"{key_prefix}rank_correlation_{estimator_name_1}_{estimator_name_2}"
-            ] = float(spearmanr(estimate_1, estimate_2)[0])
+        metrics[f"{key_prefix}correlation_ddu_au_eu"] = float(
+            pearsonr(ddu_aleatoric, ddu_epistemic)[0]
+        )
+        metrics[f"{key_prefix}rank_correlation_ddu_au_eu"] = float(
+            spearmanr(ddu_aleatoric, ddu_epistemic)[0]
+        )
+    elif isinstance(model, MahalanobisWrapper):
+        mahalanobis_aleatoric = estimates["expected_entropies"]
+        mahalanobis_epistemic = estimates["mahalanobis_values"]
+
+        metrics[f"{key_prefix}correlation_mahalanobis_au_eu"] = float(
+            pearsonr(mahalanobis_aleatoric, mahalanobis_epistemic)[0]
+        )
+        metrics[f"{key_prefix}rank_correlation_mahalanobis_au_eu"] = float(
+            spearmanr(mahalanobis_aleatoric, mahalanobis_epistemic)[0]
+        )
+
+    # Gaussian logit decomposition of Kendall and Gal
+    if not isinstance(model, MCInfoNCEWrapper):
+        kendall_gal_aleatoric = estimates["expected_entropies"]
+        kendall_gal_epistemic_prob = estimates["expected_variances_of_probs"]
+        kendall_gal_epistemic_logit = estimates["expected_variances_of_logits"]
+
+        metrics[f"{key_prefix}correlation_kendall_gal_au_eu_prob"] = float(
+            pearsonr(kendall_gal_aleatoric, kendall_gal_epistemic_prob)[0]
+        )
+        metrics[f"{key_prefix}rank_correlation_kendall_gal_au_eu_prob"] = float(
+            spearmanr(kendall_gal_aleatoric, kendall_gal_epistemic_prob)[0]
+        )
+
+        metrics[f"{key_prefix}correlation_kendall_gal_au_eu_logit"] = float(
+            pearsonr(kendall_gal_aleatoric, kendall_gal_epistemic_logit)[0]
+        )
+        metrics[f"{key_prefix}rank_correlation_kendall_gal_au_eu_logit"] = float(
+            spearmanr(kendall_gal_aleatoric, kendall_gal_epistemic_logit)[0]
+        )
+
+    # Internal Gaussian logit decomposition of Kendall and Gal
+    if isinstance(model, HetClassNNWrapper):
+        kendall_gal_aleatoric = estimates["expected_entropies"]
+        kendall_gal_epistemic_internal_prob = estimates[
+            "expected_variances_of_internal_probs"
+        ]
+        kendall_gal_epistemic_internal_logit = estimates[
+            "expected_variances_of_internal_logits"
+        ]
+
+        metrics[f"{key_prefix}correlation_kendall_gal_au_eu_internal_prob"] = float(
+            pearsonr(kendall_gal_aleatoric, kendall_gal_epistemic_internal_prob)[0]
+        )
+        metrics[
+            f"{key_prefix}rank_correlation_kendall_gal_au_eu_internal_prob"
+        ] = float(
+            spearmanr(kendall_gal_aleatoric, kendall_gal_epistemic_internal_prob)[0]
+        )
+
+        metrics[f"{key_prefix}correlation_kendall_gal_au_eu_internal_logit"] = float(
+            pearsonr(kendall_gal_aleatoric, kendall_gal_epistemic_internal_logit)[0]
+        )
+        metrics[
+            f"{key_prefix}rank_correlation_kendall_gal_au_eu_internal_logit"
+        ] = float(
+            spearmanr(kendall_gal_aleatoric, kendall_gal_epistemic_internal_logit)[0]
+        )
 
     return metrics
 
@@ -1918,13 +1974,6 @@ def evaluate_on_correlation_of_decompositions(
             pearsonr(expected_entropies, expected_entropies_plus_expected_divergences)[
                 0
             ]
-        )
-
-    if isinstance(model, DDUWrapper):
-        ddu_aleatoric = estimates["expected_entropies"]
-        ddu_epistemic = estimates["gmm_neg_log_densities"]
-        metrics[f"{key_prefix}correlation_ddu_au_eu"] = float(
-            pearsonr(ddu_aleatoric, ddu_epistemic)[0]
         )
 
     if not is_evaluate_gt or isinstance(model, MCInfoNCEWrapper):
@@ -2118,10 +2167,6 @@ def get_bundle(
     ## Practical tasks
 
     # Abstained prediction
-    # - needs validation loader
-    # - but at least it's theoretically possible
-
-    # For abstinence, correctness is calculated differently
     label_shape = next(iter(loader))[1].shape
     if is_same_task and is_soft_labels:
         assert label_shape[-1] == model.num_classes + 1
@@ -2192,24 +2237,8 @@ def get_bundle(
         targets["gt_epistemics_bregman"] = gt_epistemics_bregman
 
         # Time
-        time_expected_entropy_m = AverageMeter()
-        times["time_expected_entropy_m"] = time_expected_entropy_m
-        time_expected_max_prob_m = AverageMeter()
-        times["time_expected_max_prob_m"] = time_expected_max_prob_m
-        time_entropy_of_bma_m = AverageMeter()
-        times["time_entropy_of_bma_m"] = time_entropy_of_bma_m
-        time_entropy_of_fbar_m = AverageMeter()
-        times["time_entropy_of_fbar_m"] = time_entropy_of_fbar_m
-        time_max_prob_of_bma_m = AverageMeter()
-        times["time_max_prob_of_bma_m"] = time_max_prob_of_bma_m
-        time_max_prob_of_fbar_m = AverageMeter()
-        times["time_max_prob_of_fbar_m"] = time_max_prob_of_fbar_m
-        time_expected_divergence_m = AverageMeter()
-        times["time_expected_divergence_m"] = time_expected_divergence_m
-        time_jsd_m = AverageMeter()
-        times["time_jsd_m"] = time_jsd_m
-        time_dempster_shafer_value_m = AverageMeter()
-        times["time_dempster_shafer_value_m"] = time_dempster_shafer_value_m
+        time_forward_m = AverageMeter()
+        times["time_forward_m"] = time_forward_m
 
         log_fbars = torch.empty(num_samples, model.num_classes)
         log_probs["log_fbars"] = log_fbars
@@ -2247,53 +2276,52 @@ def get_bundle(
         jensen_shannon_divergences = torch.empty(num_samples)
         estimates["jensen_shannon_divergences"] = jensen_shannon_divergences
 
+        expected_variances_of_probs = torch.empty(num_samples)
+        estimates["expected_variances_of_probs"] = expected_variances_of_probs
+        expected_variances_of_logits = torch.empty(num_samples)
+        estimates["expected_variances_of_logits"] = expected_variances_of_logits
+
         # This class gives "logits" that are different from the baseline model.
         if isinstance(model, NonIsotropicvMFWrapper):
-            time_nivmf_inverse_kappa_m = AverageMeter()
-            times["time_nivmf_inverse_kappa_m"] = time_nivmf_inverse_kappa_m
-
             nivmf_inverse_kappas = torch.empty(num_samples)
             estimates["nivmf_inverse_kappas"] = nivmf_inverse_kappas
         # This class modifies the model when it's not frozen, leading to different
         # logits.
         elif isinstance(model, BaseLossPredictionWrapper):
             # PU
-            time_risk_value_m = AverageMeter()
-            times["time_risk_value_m"] = time_risk_value_m
             risk_values = torch.empty(num_samples)
             estimates["risk_values"] = risk_values
         elif isinstance(model, DDUWrapper):
-            time_gmm_neg_log_density_m = AverageMeter()
-            times["time_gmm_neg_log_density_m"] = time_gmm_neg_log_density_m
             gmm_neg_log_densities = torch.empty(num_samples)
             estimates["gmm_neg_log_densities"] = gmm_neg_log_densities
         # This class also modifies the model when it's not frozen.
         elif isinstance(model, BaseCorrectnessPredictionWrapper):
             # PU
-            time_error_probability_m = AverageMeter()
-            times["time_error_probability_m"] = time_error_probability_m
             error_probabilities = torch.empty(num_samples)
             estimates["error_probabilities"] = error_probabilities
         # This class gives "logits" that are different from the baseline model.
         elif isinstance(model, DUQWrapper):
             # EU
-            time_duq_value_m = AverageMeter()
-            times["time_duq_value_m"] = time_duq_value_m
             duq_values = torch.empty(num_samples)
             estimates["duq_values"] = duq_values
         # While this class returns logits, it's post-hoc. As such, the logits are not
         # changed compared to the baseline model, so we'd get the same results.
         elif isinstance(model, MahalanobisWrapper):
             # EU
-            time_mahalanobis_value_m = AverageMeter()
-            times["time_mahalanobis_value_m"] = time_mahalanobis_value_m
             mahalanobis_values = torch.empty(num_samples)
             estimates["mahalanobis_values"] = mahalanobis_values
+        elif isinstance(model, HetClassNNWrapper):
+            expected_variances_of_internal_probs = torch.empty(num_samples)
+            estimates[
+                "expected_variances_of_internal_probs"
+            ] = expected_variances_of_internal_probs
+            expected_variances_of_internal_logits = torch.empty(num_samples)
+            estimates[
+                "expected_variances_of_internal_logits"
+            ] = expected_variances_of_internal_logits
+
     # This class doesn't return any logits.
     else:
-        time_mcinfonce_inverse_kappa_m = AverageMeter()
-        times["time_mcinfonce_inverse_kappa_m"] = time_mcinfonce_inverse_kappa_m
-
         mcinfonce_inverse_kappas = torch.empty(num_samples)
         estimates["mcinfonce_inverse_kappas"] = mcinfonce_inverse_kappas
 
@@ -2315,21 +2343,24 @@ def get_bundle(
 
             batch_size = input.shape[0]
 
-            base_time_start = time.perf_counter()
+            time_forward_start = time.perf_counter()
             with amp_autocast():
                 inference_dict = model(input)
 
             if device.type == "cuda":
                 torch.cuda.synchronize()
 
-            base_time_end = time.perf_counter()
-            base_time = base_time_end - base_time_start
+            time_forward_end = time.perf_counter()
+            time_forward = time_forward_end - time_forward_start
 
             for key in list(inference_dict.keys()):
                 inference_dict[key] = inference_dict[key].detach().cpu().float()
 
             inference_dict = convert_inference_dict(
-                model, inference_dict, base_time, args
+                model=model,
+                inference_dict=inference_dict,
+                time_forward=time_forward,
+                args=args,
             )
 
             features[indices] = inference_dict["feature"]
@@ -2345,15 +2376,7 @@ def get_bundle(
                     log_fbars=log_fbars,
                     log_bmas=log_bmas,
                     gt_epistemics_bregman=gt_epistemics_bregman,
-                    time_expected_entropy_m=time_expected_entropy_m,
-                    time_expected_max_prob_m=time_expected_max_prob_m,
-                    time_entropy_of_bma_m=time_entropy_of_bma_m,
-                    time_entropy_of_fbar_m=time_entropy_of_fbar_m,
-                    time_max_prob_of_bma_m=time_max_prob_of_bma_m,
-                    time_max_prob_of_fbar_m=time_max_prob_of_fbar_m,
-                    time_expected_divergence_m=time_expected_divergence_m,
-                    time_jsd_m=time_jsd_m,
-                    time_dempster_shafer_value_m=time_dempster_shafer_value_m,
+                    time_forward_m=time_forward_m,
                     expected_entropies=expected_entropies,
                     expected_entropies_plus_expected_divergences=expected_entropies_plus_expected_divergences,
                     one_minus_expected_max_probs=one_minus_expected_max_probs,
@@ -2363,62 +2386,59 @@ def get_bundle(
                     one_minus_max_probs_of_fbar=one_minus_max_probs_of_fbar,
                     jensen_shannon_divergences=jensen_shannon_divergences,
                     dempster_shafer_values=dempster_shafer_values,
+                    expected_variances_of_probs=expected_variances_of_probs,
+                    expected_variances_of_logits=expected_variances_of_logits,
                 )
 
             if isinstance(model, NonIsotropicvMFWrapper):
                 update_nivmf(
                     inference_dict=inference_dict,
                     indices=indices,
-                    batch_size=batch_size,
-                    time_nivmf_inverse_kappa_m=time_nivmf_inverse_kappa_m,
                     nivmf_inverse_kappas=nivmf_inverse_kappas,
                 )
             elif isinstance(model, BaseLossPredictionWrapper):
                 update_losspred(
                     inference_dict=inference_dict,
                     indices=indices,
-                    batch_size=batch_size,
-                    time_risk_value_m=time_risk_value_m,
                     risk_values=risk_values,
                 )
             elif isinstance(model, DDUWrapper):
                 update_ddu(
                     inference_dict=inference_dict,
                     indices=indices,
-                    batch_size=batch_size,
-                    time_gmm_neg_log_density_m=time_gmm_neg_log_density_m,
                     gmm_neg_log_densities=gmm_neg_log_densities,
                 )
             elif isinstance(model, BaseCorrectnessPredictionWrapper):
                 update_corrpred(
                     inference_dict=inference_dict,
                     indices=indices,
-                    batch_size=batch_size,
-                    time_error_probability_m=time_error_probability_m,
                     error_probabilities=error_probabilities,
                 )
             elif isinstance(model, DUQWrapper):
                 update_duq(
                     inference_dict=inference_dict,
                     indices=indices,
-                    batch_size=batch_size,
-                    time_duq_value_m=time_duq_value_m,
                     duq_values=duq_values,
                 )
             elif isinstance(model, MahalanobisWrapper):
                 update_mahalanobis(
                     inference_dict=inference_dict,
                     indices=indices,
-                    batch_size=batch_size,
-                    time_mahalanobis_value_m=time_mahalanobis_value_m,
                     mahalanobis_values=mahalanobis_values,
+                )
+            elif isinstance(model, HetClassNNWrapper):
+                update_hetclassnn(
+                    inference_dict=inference_dict,
+                    indices=indices,
+                    expected_variances_of_internal_probs=expected_variances_of_internal_probs,
+                    expected_variances_of_internal_logits=expected_variances_of_internal_logits,
                 )
             elif isinstance(model, MCInfoNCEWrapper):
                 update_mcinfonce(
                     inference_dict=inference_dict,
                     indices=indices,
                     batch_size=batch_size,
-                    time_mcinfonce_inverse_kappa_m=time_mcinfonce_inverse_kappa_m,
+                    time_forward_m=time_forward_m,
                     mcinfonce_inverse_kappas=mcinfonce_inverse_kappas,
                 )
 
@@ -2487,7 +2507,7 @@ def get_bundle(
     else:
         temp_logits = torch.empty(num_samples, model.num_models, model.num_classes)
         temp_features = torch.empty(num_samples, model.num_models, model.num_features)
-        base_time_m = AverageMeter()
+        time_forward_m = AverageMeter()
 
         for model_index in range(model.num_models):
             model.load_model(model_index)
@@ -2502,21 +2522,20 @@ def get_bundle(
 
                 if args.no_prefetcher:
                     input = input.to(device)
-                    label = label.to(device)
 
                 if args.channels_last:
                     input = input.contiguous(memory_format=torch.channels_last)
 
-                base_time_start = time.perf_counter()
+                time_forward_start = time.perf_counter()
                 with amp_autocast():
                     inference_dict = model(input)
 
                 if device.type == "cuda":
                     torch.cuda.synchronize()
 
-                base_time_end = time.perf_counter()
-                base_time = base_time_end - base_time_start
-                base_time_m.update(base_time, batch_size)
+                time_forward_end = time.perf_counter()
+                time_forward = time_forward_end - time_forward_start
+                time_forward_m.update(time_forward, batch_size)
 
                 temp_logits[indices, model_index, :] = inference_dict["logit"]
                 temp_features[indices, model_index, :] = inference_dict["feature"]
@@ -2524,7 +2543,7 @@ def get_bundle(
                 current_ind += batch_size
 
         # Aggregate logits and features
-        avg_base_time = base_time_m.avg
+        avg_time_forward = time_forward_m.avg
 
         features = temp_features.mean(dim=1)
 
@@ -2539,10 +2558,10 @@ def get_bundle(
             }
 
             inference_dict = convert_inference_dict(
-                model,
-                inference_dict,
-                avg_base_time,
-                args,
+                model=model,
+                inference_dict=inference_dict,
+                time_forward=avg_time_forward,
+                args=args,
             )
 
             update_logit_based(
@@ -2552,15 +2571,7 @@ def get_bundle(
                 log_fbars=log_fbars,
                 log_bmas=log_bmas,
                 gt_epistemics_bregman=gt_epistemics_bregman,
-                time_expected_entropy_m=time_expected_entropy_m,
-                time_expected_max_prob_m=time_expected_max_prob_m,
-                time_entropy_of_bma_m=time_entropy_of_bma_m,
-                time_entropy_of_fbar_m=time_entropy_of_fbar_m,
-                time_max_prob_of_bma_m=time_max_prob_of_bma_m,
-                time_max_prob_of_fbar_m=time_max_prob_of_fbar_m,
-                time_expected_divergence_m=time_expected_divergence_m,
-                time_jsd_m=time_jsd_m,
-                time_dempster_shafer_value_m=time_dempster_shafer_value_m,
+                time_forward_m=time_forward_m,
                 expected_entropies=expected_entropies,
                 expected_entropies_plus_expected_divergences=expected_entropies_plus_expected_divergences,
                 one_minus_expected_max_probs=one_minus_expected_max_probs,
@@ -2732,15 +2743,15 @@ def get_bundle(
     return estimates, log_probs, targets, times
 
 
-def convert_inference_dict(model, inference_dict, base_time, args):
+def convert_inference_dict(model, inference_dict, time_forward, args):
     converted_inference_dict = {}
 
     features = inference_dict["feature"]
     converted_inference_dict["feature"] = features
 
-    if not isinstance(model, MCInfoNCEWrapper):
-        time_log_probs_start = time.perf_counter()
+    converted_inference_dict["time_forward"] = time_forward
 
+    if not isinstance(model, MCInfoNCEWrapper):
         min_real = torch.finfo(features.dtype).min
 
         if isinstance(model, DirichletWrapper):
@@ -2753,308 +2764,182 @@ def convert_inference_dict(model, inference_dict, base_time, args):
                 .clamp(min=min_real)
             )  # [B, S, C]
 
-            time_log_probs_end = time.perf_counter()
-            time_log_probs = time_log_probs_end - time_log_probs_start + base_time
-
-            time_sum_alphas_start = time.perf_counter()
             sum_alphas = alphas.sum(dim=1)  # [B]
-            time_sum_alphas_end = time.perf_counter()
-            time_sum_alphas = time_sum_alphas_end - time_sum_alphas_start + base_time
-
-            time_mean_alphas_start = time.perf_counter()
             mean_alphas = alphas.div(sum_alphas.unsqueeze(1))  # [B, C]
-            time_mean_alphas_end = time.perf_counter()
-            time_mean_alphas = (
-                time_mean_alphas_end - time_mean_alphas_start + time_sum_alphas
-            )
 
             log_bma = mean_alphas.log().clamp(min=min_real)
             converted_inference_dict["log_bma"] = log_bma
 
-            time_log_fbar_start = time.perf_counter()
             log_fbar = F.log_softmax(log_probs.mean(dim=1), dim=-1)  # [B, C]
-            time_log_fbar_end = time.perf_counter()
-            time_log_fbar = time_log_fbar_end - time_log_fbar_start + time_log_probs
             converted_inference_dict["log_fbar"] = log_fbar
 
-            time_expected_entropy_start = time.perf_counter()
             digamma_term = torch.digamma(alphas + 1) - torch.digamma(
                 sum_alphas + 1
             ).unsqueeze(
                 1
             )  # [B, C]
             expected_entropy = -mean_alphas.mul(digamma_term).sum(dim=1)  # [B]
-            time_expected_entropy_end = time.perf_counter()
-            time_expected_entropy = (
-                time_expected_entropy_end
-                - time_expected_entropy_start
-                + time_mean_alphas
-            )
             converted_inference_dict["expected_entropy"] = expected_entropy
-            converted_inference_dict["time_expected_entropy"] = time_expected_entropy
 
-            time_expected_divergence_start = time.perf_counter()
             expected_divergence = kl_divergence(
                 log_fbar, log_probs.permute(1, 0, 2)
             ).mean(dim=0)
-            time_expected_divergence_end = time.perf_counter()
-            time_expected_divergence = (
-                time_expected_divergence_end
-                - time_expected_divergence_start
-                + time_log_fbar
-            )
             converted_inference_dict["expected_divergence"] = expected_divergence
-            converted_inference_dict[
-                "time_expected_divergence"
-            ] = time_expected_divergence
 
-            time_probs_start = time.perf_counter()
-            probs = log_probs.exp()
-            time_probs_end = time.perf_counter()
-            time_probs = time_probs_end - time_probs_start
+            probs = log_probs.exp()  # [B, S, C]
 
-            time_expected_max_prob_start = time.perf_counter()
+            if probs.shape[1] > 1:
+                converted_inference_dict["expected_variance_of_probs"] = torch.var(
+                    probs, dim=1
+                ).mean(
+                    dim=-1
+                )  # [B]
+            else:
+                converted_inference_dict["expected_variance_of_probs"] = 0
+
+            convert_inference_dict["expected_variance_of_logits"] = 0
+
             expected_max_prob = probs.max(dim=-1)[0].mean(dim=1)
-            time_expected_max_prob_end = time.perf_counter()
-            time_expected_max_prob = (
-                time_expected_max_prob_end - time_expected_max_prob_start + time_probs
-            )
             converted_inference_dict["expected_max_prob"] = expected_max_prob
-            converted_inference_dict["time_expected_max_prob"] = time_expected_max_prob
 
-            time_entropy_of_bma_start = time.perf_counter()
             entropy_of_bma = entropy(mean_alphas)
-            time_entropy_of_bma_end = time.perf_counter()
-            time_entropy_of_bma = (
-                time_entropy_of_bma_end - time_entropy_of_bma_start + time_mean_alphas
-            )
             converted_inference_dict["entropy_of_bma"] = entropy_of_bma
-            converted_inference_dict["time_entropy_of_bma"] = time_entropy_of_bma
 
-            time_fbar_start = time.perf_counter()
             fbar = log_fbar.exp()
-            time_fbar_end = time.perf_counter()
-            time_fbar = time_fbar_end - time_fbar_start
 
-            time_entropy_of_fbar_start = time.perf_counter()
             entropy_of_fbar = entropy(fbar)
-            time_entropy_of_fbar_end = time.perf_counter()
-            time_entropy_of_fbar = (
-                time_entropy_of_fbar_end - time_entropy_of_fbar_start + time_fbar
-            )
             converted_inference_dict["entropy_of_fbar"] = entropy_of_fbar
-            converted_inference_dict["time_entropy_of_fbar"] = time_entropy_of_fbar
 
-            time_max_prob_of_bma_start = time.perf_counter()
             max_prob_of_bma = mean_alphas.max(dim=-1)[0]
-            time_max_prob_of_bma_end = time.perf_counter()
-            time_max_prob_of_bma = (
-                time_max_prob_of_bma_end - time_max_prob_of_bma_start + time_mean_alphas
-            )
             converted_inference_dict["max_prob_of_bma"] = max_prob_of_bma
-            converted_inference_dict["time_max_prob_of_bma"] = time_max_prob_of_bma
 
-            time_max_prob_of_fbar_start = time.perf_counter()
             max_prob_of_fbar = fbar.max(dim=-1)[0]
-            time_max_prob_of_fbar_end = time.perf_counter()
-            time_max_prob_of_fbar = (
-                time_max_prob_of_fbar_end - time_max_prob_of_fbar_start + time_fbar
-            )
             converted_inference_dict["max_prob_of_fbar"] = max_prob_of_fbar
-            converted_inference_dict["time_max_prob_of_fbar"] = time_max_prob_of_fbar
 
-            time_jsd_start = time.perf_counter()
             jensen_shannon_divergence = entropy_of_bma - expected_entropy
-            time_jsd_end = time.perf_counter()
-            time_jsd = (
-                time_jsd_end
-                - time_jsd_start
-                + time_entropy_of_bma
-                + time_expected_entropy
-                - time_probs
-            )
             converted_inference_dict[
                 "jensen_shannon_divergence"
             ] = jensen_shannon_divergence
-            converted_inference_dict["time_jsd"] = time_jsd
 
-            time_dempster_shafer_value_start = time.perf_counter()
             num_classes = alphas.shape[1]
             dempster_shafer_value = num_classes / sum_alphas  # [B]
-            time_dempster_shafer_value_end = time.perf_counter()
-            time_dempster_shafer_value = (
-                time_dempster_shafer_value_end
-                - time_dempster_shafer_value_start
-                + time_sum_alphas
-            )
             converted_inference_dict["dempster_shafer_value"] = dempster_shafer_value
-            converted_inference_dict[
-                "time_dempster_shafer_value"
-            ] = time_dempster_shafer_value
         else:
             logits = inference_dict["logit"]
             if logits.dim() == 2:  # [B, C]
                 logits = logits.unsqueeze(dim=1)  # [B, 1, C]
             log_probs = F.log_softmax(logits, dim=-1)  # [B, S, C]
 
-            time_log_probs_end = time.perf_counter()
-            time_log_probs = time_log_probs_end - time_log_probs_start + base_time
-
-            time_probs_start = time.perf_counter()
             probs = log_probs.exp()  # [B, S, C]
-            time_probs_end = time.perf_counter()
-            time_probs = time_probs_end - time_probs_start + time_log_probs
 
-            time_log_fbar_start = time.perf_counter()
+            if logits.shape[1] > 1:
+                converted_inference_dict["expected_variance_of_logits"] = torch.var(
+                    logits, dim=1
+                ).mean(
+                    dim=-1
+                )  # [B]
+            else:
+                converted_inference_dict["expected_variance_of_logits"] = 0
+
+            if probs.shape[1] > 1:
+                converted_inference_dict["expected_variance_of_probs"] = torch.var(
+                    probs, dim=1
+                ).mean(
+                    dim=-1
+                )  # [B]
+            else:
+                converted_inference_dict["expected_variance_of_probs"] = 0
 
             log_fbar = F.log_softmax(log_probs.mean(dim=1), dim=-1)  # [B, C]
 
-            time_log_fbar_end = time.perf_counter()
-            time_log_fbar = time_log_fbar_end - time_log_fbar_start + time_log_probs
-
-            time_fbar_start = time.perf_counter()
             fbar = log_fbar.exp()
-            time_fbar_end = time.perf_counter()
-            time_fbar = time_fbar_end - time_fbar_start + time_log_fbar
             converted_inference_dict["log_fbar"] = log_fbar
 
-            time_bma_start = time.perf_counter()
             bma = probs.mean(dim=1)  # [B, C]
-            time_bma_end = time.perf_counter()
-            time_bma = time_bma_end - time_bma_start + time_probs
 
             log_bma = bma.log()  # [B, C]
             log_bma = torch.clamp(log_bma, min=min_real)
             converted_inference_dict["log_bma"] = log_bma
 
-            time_expected_entropy_start = time.perf_counter()
             expected_entropy = entropy(probs).mean(dim=-1)
-            time_expected_entropy_end = time.perf_counter()
-            time_expected_entropy = (
-                time_expected_entropy_end - time_expected_entropy_start + time_probs
-            )
             converted_inference_dict["expected_entropy"] = expected_entropy
-            converted_inference_dict["time_expected_entropy"] = time_expected_entropy
 
-            time_expected_divergence_start = time.perf_counter()
             expected_divergence = kl_divergence(
                 log_fbar, log_probs.permute(1, 0, 2)
             ).mean(dim=0)
-            time_expected_divergence_end = time.perf_counter()
-            time_expected_divergence = (
-                time_expected_divergence_end
-                - time_expected_divergence_start
-                + time_log_fbar
-            )
             converted_inference_dict["expected_divergence"] = expected_divergence
-            converted_inference_dict[
-                "time_expected_divergence"
-            ] = time_expected_divergence
 
-            time_expected_max_prob_start = time.perf_counter()
             expected_max_prob = probs.max(dim=-1)[0].mean(dim=1)
-            time_expected_max_prob_end = time.perf_counter()
-            time_expected_max_prob = (
-                time_expected_max_prob_end - time_expected_max_prob_start + time_probs
-            )
             converted_inference_dict["expected_max_prob"] = expected_max_prob
-            converted_inference_dict["time_expected_max_prob"] = time_expected_max_prob
 
-            time_entropy_of_bma_start = time.perf_counter()
             entropy_of_bma = entropy(bma)
-            time_entropy_of_bma_end = time.perf_counter()
-            time_entropy_of_bma = (
-                time_entropy_of_bma_end - time_entropy_of_bma_start + time_bma
-            )
+
             converted_inference_dict["entropy_of_bma"] = entropy_of_bma
-            converted_inference_dict["time_entropy_of_bma"] = time_entropy_of_bma
 
-            time_entropy_of_fbar_start = time.perf_counter()
             entropy_of_fbar = entropy(fbar)
-            time_entropy_of_fbar_end = time.perf_counter()
-            time_entropy_of_fbar = (
-                time_entropy_of_fbar_end - time_entropy_of_fbar_start + time_fbar
-            )
             converted_inference_dict["entropy_of_fbar"] = entropy_of_fbar
-            converted_inference_dict["time_entropy_of_fbar"] = time_entropy_of_fbar
 
-            time_max_prob_of_bma_start = time.perf_counter()
             max_prob_of_bma = bma.max(dim=-1)[0]
-            time_max_prob_of_bma_end = time.perf_counter()
-            time_max_prob_of_bma = (
-                time_max_prob_of_bma_end - time_max_prob_of_bma_start + time_bma
-            )
             converted_inference_dict["max_prob_of_bma"] = max_prob_of_bma
-            converted_inference_dict["time_max_prob_of_bma"] = time_max_prob_of_bma
 
-            time_max_prob_of_fbar_start = time.perf_counter()
             max_prob_of_fbar = fbar.max(dim=-1)[0]
-            time_max_prob_of_fbar_end = time.perf_counter()
-            time_max_prob_of_fbar = (
-                time_max_prob_of_fbar_end - time_max_prob_of_fbar_start + time_fbar
-            )
             converted_inference_dict["max_prob_of_fbar"] = max_prob_of_fbar
-            converted_inference_dict["time_max_prob_of_fbar"] = time_max_prob_of_fbar
 
-            time_jsd_start = time.perf_counter()
             jensen_shannon_divergence = entropy_of_bma - expected_entropy
-            time_jsd_end = time.perf_counter()
-            time_jsd = (
-                time_jsd_end
-                - time_jsd_start
-                + time_entropy_of_bma
-                + time_expected_entropy
-                - time_probs
-            )
             converted_inference_dict[
                 "jensen_shannon_divergence"
             ] = jensen_shannon_divergence
-            converted_inference_dict["time_jsd"] = time_jsd
 
-            time_dempster_shafer_value_start = time.perf_counter()
             dempster_shafer_value = dempster_shafer_metric(logits.mean(dim=1))
-            time_dempster_shafer_value_end = time.perf_counter()
-            time_dempster_shafer_value = (
-                time_dempster_shafer_value_end
-                - time_dempster_shafer_value_start
-                + base_time
-            )
             converted_inference_dict["dempster_shafer_value"] = dempster_shafer_value
-            converted_inference_dict[
-                "time_dempster_shafer_value"
-            ] = time_dempster_shafer_value
 
         if isinstance(model, NonIsotropicvMFWrapper):
             converted_inference_dict["nivmf_inverse_kappa"] = inference_dict[
                 "nivmf_inverse_kappa"
             ]
-            converted_inference_dict["time_nivmf_inverse_kappa"] = base_time
         elif isinstance(model, BaseLossPredictionWrapper):
             converted_inference_dict["risk_value"] = inference_dict["risk_value"]
-            converted_inference_dict["time_risk_value"] = base_time
         elif isinstance(model, DDUWrapper):
             converted_inference_dict["gmm_neg_log_density"] = inference_dict[
                 "gmm_neg_log_density"
             ]
-            converted_inference_dict["time_gmm_neg_log_density"] = base_time
         elif isinstance(model, BaseCorrectnessPredictionWrapper):
             converted_inference_dict["error_probability"] = inference_dict[
                 "error_probability"
             ]
-            converted_inference_dict["time_error_probability"] = base_time
         elif isinstance(model, DUQWrapper):
             converted_inference_dict["duq_value"] = inference_dict["duq_value"]
-            converted_inference_dict["time_duq_value"] = base_time
         elif isinstance(model, MahalanobisWrapper):
             converted_inference_dict["mahalanobis_value"] = inference_dict[
                 "mahalanobis_value"
             ]
-            converted_inference_dict["time_mahalanobis_value"] = base_time
+        elif isinstance(model, HetClassNNWrapper):
+            internal_logits = inference_dict["internal_logit"]
+            log_internal_probs = F.log_softmax(internal_logits, dim=-1)  # [B, S, C]
+
+            internal_probs = log_internal_probs.exp()  # [B, S, C]
+
+            if internal_logits.shape[1] > 1:
+                converted_inference_dict[
+                    "expected_variance_of_internal_logits"
+                ] = torch.var(internal_logits, dim=1).mean(
+                    dim=-1
+                )  # [B]
+            else:
+                converted_inference_dict["expected_variance_of_internal_logits"] = 0
+
+            if internal_probs.shape[1] > 1:
+                converted_inference_dict[
+                    "expected_variance_of_internal_probs"
+                ] = torch.var(internal_probs, dim=1).mean(
+                    dim=-1
+                )  # [B]
+            else:
+                converted_inference_dict["expected_variance_of_internal_probs"] = 0
     else:
         converted_inference_dict["mcinfonce_inverse_kappa"] = inference_dict[
             "mcinfonce_inverse_kappa"
         ]
-        converted_inference_dict["time_mcinfonce_inverse_kappa"] = base_time
 
     return converted_inference_dict
 
@@ -3066,15 +2951,7 @@ def update_logit_based(
     log_fbars,
     log_bmas,
     gt_epistemics_bregman,
-    time_expected_entropy_m,
-    time_expected_max_prob_m,
-    time_entropy_of_bma_m,
-    time_entropy_of_fbar_m,
-    time_max_prob_of_bma_m,
-    time_max_prob_of_fbar_m,
-    time_expected_divergence_m,
-    time_jsd_m,
-    time_dempster_shafer_value_m,
+    time_forward_m,
     expected_entropies,
     expected_entropies_plus_expected_divergences,
     one_minus_expected_max_probs,
@@ -3089,21 +2966,7 @@ def update_logit_based(
     log_bmas[indices] = inference_dict["log_bma"]
     gt_epistemics_bregman[indices] = inference_dict["expected_divergence"]
 
-    time_expected_entropy_m.update(inference_dict["time_expected_entropy"], batch_size)
-    time_expected_max_prob_m.update(
-        inference_dict["time_expected_max_prob"], batch_size
-    )
-    time_entropy_of_bma_m.update(inference_dict["time_entropy_of_bma"], batch_size)
-    time_entropy_of_fbar_m.update(inference_dict["time_entropy_of_fbar"], batch_size)
-    time_max_prob_of_bma_m.update(inference_dict["time_max_prob_of_bma"], batch_size)
-    time_max_prob_of_fbar_m.update(inference_dict["time_max_prob_of_fbar"], batch_size)
-    time_expected_divergence_m.update(
-        inference_dict["time_expected_divergence"], batch_size
-    )
-    time_jsd_m.update(inference_dict["time_jsd"], batch_size)
-    time_dempster_shafer_value_m.update(
-        inference_dict["time_dempster_shafer_value"], batch_size
-    )
+    time_forward_m.update(inference_dict["time_forward"], batch_size)
 
     expected_entropies[indices] = inference_dict["expected_entropy"]
     expected_entropies_plus_expected_divergences[indices] = (
@@ -3121,71 +2984,59 @@ def update_logit_based(
 def update_nivmf(
     inference_dict,
     indices,
-    batch_size,
-    time_nivmf_inverse_kappa_m,
     nivmf_inverse_kappas,
 ):
-    time_nivmf_inverse_kappa_m.update(
-        inference_dict["time_nivmf_inverse_kappa"], batch_size
-    )
     nivmf_inverse_kappas[indices] = inference_dict["nivmf_inverse_kappa"]
 
 
-def update_losspred(
-    inference_dict, indices, batch_size, time_risk_value_m, risk_values
-):
-    time_risk_value_m.update(inference_dict["time_risk_value"], batch_size)
+def update_losspred(inference_dict, indices, risk_values):
     risk_values[indices] = inference_dict["risk_value"]
 
 
 def update_ddu(
     inference_dict,
     indices,
-    batch_size,
-    time_gmm_neg_log_density_m,
     gmm_neg_log_densities,
 ):
-    time_gmm_neg_log_density_m.update(
-        inference_dict["time_gmm_neg_log_density"], batch_size
-    )
     gmm_neg_log_densities[indices] = inference_dict["gmm_neg_log_density"]
 
 
-def update_corrpred(
-    inference_dict, indices, batch_size, time_error_probability_m, error_probabilities
-):
-    time_error_probability_m.update(
-        inference_dict["time_error_probability"], batch_size
-    )
+def update_corrpred(inference_dict, indices, error_probabilities):
     error_probabilities[indices] = inference_dict["error_probability"]
 
 
-def update_duq(inference_dict, indices, batch_size, time_duq_value_m, duq_values):
-    time_duq_value_m.update(inference_dict["time_duq_value"], batch_size)
+def update_duq(inference_dict, indices, duq_values):
     duq_values[indices] = inference_dict["duq_value"]
 
 
 def update_mahalanobis(
     inference_dict,
     indices,
-    batch_size,
-    time_mahalanobis_value_m,
     mahalanobis_values,
 ):
-    time_mahalanobis_value_m.update(
-        inference_dict["time_mahalanobis_value"], batch_size
-    )
     mahalanobis_values[indices] = inference_dict["mahalanobis_value"]
+
+
+def update_hetclassnn(
+    inference_dict,
+    indices,
+    expected_variances_of_internal_probs,
+    expected_variances_of_internal_logits,
+):
+    expected_variances_of_internal_probs[indices] = inference_dict[
+        "expected_variance_of_internal_probs"
+    ]
+    expected_variances_of_internal_logits[indices] = inference_dict[
+        "expected_variance_of_internal_logits"
+    ]
 
 
 def update_mcinfonce(
     inference_dict,
     indices,
     batch_size,
-    time_mcinfonce_inverse_kappa_m,
+    time_forward_m,
     mcinfonce_inverse_kappas,
 ):
-    time_mcinfonce_inverse_kappa_m.update(
-        inference_dict["time_mcinfonce_inverse_kappa"], batch_size
-    )
+    time_forward_m.update(inference_dict["time_forward"], batch_size)
     mcinfonce_inverse_kappas[indices] = inference_dict["mcinfonce_inverse_kappa"]

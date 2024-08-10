@@ -78,10 +78,6 @@ def recall_at_one(features, targets, mode="matmul"):
     return is_same_class
 
 
-def pct_cropped_has_bigger_pu(pu_orig, pu_cropped):
-    return (pu_orig < pu_cropped).float().mean()
-
-
 def entropy(probs, dim=-1):
     log_probs = probs.log()
     min_real = torch.finfo(log_probs.dtype).min
@@ -302,7 +298,8 @@ def coverage_for_accuracy(
         + start_index
     )
     if coverage_for_accuracy_nonstrict > start_index:
-        # If they were the same, even the first non-noisy measurement didn't satisfy the risk, so its coverage is undue,
+        # If they were the same, even the first non-noisy measurement didn't satisfy the
+        # risk, so its coverage is undue,
         # use the original index. Otherwise, use the non-strict to diffuse noisiness.
         coverage_for_accuracy = coverage_for_accuracy_nonstrict
 

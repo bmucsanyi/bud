@@ -12,19 +12,20 @@ sys.path.insert(0, "..")
 
 from utils import (
     POSTERIOR_ESTIMATORS,
-    GT_LABELS,
     ID_TO_METHOD_IMAGENET,
     DATASET_CONVERSION_DICT_IMAGENET,
     ESTIMATOR_CONVERSION_DICT,
     ESTIMATORLESS_METRICS,
+    CONSTRAINED_METRICS,
     create_directory,
 )
 
 from tueplots import bundles
 from matplotlib.ticker import MultipleLocator
 
-config = bundles.icml2024(family="serif", column="half", usetex=True)
-config["figure.figsize"] = (3.25, 0.98)
+config = bundles.neurips2024()
+# config["figure.figsize"] = (2.64, 0.9)
+config["figure.figsize"] = (4, 1.37)
 plt.rcParams.update(config)
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
 
@@ -51,7 +52,22 @@ def plot_and_save(suffix, data, save_path, y_min, y_max):
     ax.yaxis.set_major_locator(MultipleLocator(0.1))
     ax.yaxis.set_minor_locator(MultipleLocator(0.05))
 
-    bars = ax.bar(labels, means, yerr=np.array(error_bars).T, capsize=5, zorder=2)
+    bars = ax.bar(
+        labels,
+        means,
+        zorder=2,
+    )
+    ax.errorbar(
+        labels,
+        means,
+        yerr=np.array(error_bars).T,
+        fmt="none",
+        ecolor=np.array([105.0, 109.0, 113.0]) / 255.0,
+        elinewidth=1,
+        capsize=4,
+        markeredgewidth=0.5,
+        zorder=3,
+    )
     ax.spines[["right", "top"]].set_visible(False)
     ax.set_ylabel(f"{suffix}")
 
@@ -59,10 +75,13 @@ def plot_and_save(suffix, data, save_path, y_min, y_max):
     ax.tick_params(bottom=False)
 
     for bar, label in zip(bars, labels):
+        y_offset = (
+            0.005 * 2 * (y_max - y_min)
+        )  # Use the offset if available, otherwise default to 0.03
         ax.text(
             bar.get_x() + bar.get_width() / 2 + 0.05,
-            y_min + 0.03,
-            label,
+            y_min + y_offset,
+            ESTIMATOR_CONVERSION_DICT.get(label, "No estimator"),
             ha="center",
             va="bottom",
             rotation="vertical",
@@ -70,7 +89,7 @@ def plot_and_save(suffix, data, save_path, y_min, y_max):
             zorder=3,
         )
 
-        if label in GT_LABELS:
+        if "gt" in label:
             bar.set_color(np.array([234.0, 67.0, 53.0]) / 255.0)
         else:
             bar.set_color(np.array([66.0, 103.0, 210.0]) / 255.0)
@@ -82,6 +101,7 @@ def plot_and_save(suffix, data, save_path, y_min, y_max):
     ]
 
     # Adding the legend with adjusted handlelength to make the patches more square-like
+    feed_dict = {"bbox_to_anchor": (1, 1.13)}
     ax.legend(
         frameon=False,
         handles=legend_handles,
@@ -89,6 +109,7 @@ def plot_and_save(suffix, data, save_path, y_min, y_max):
         fontsize="small",
         handlelength=1,
         ncol=2,
+        **feed_dict,
     )
 
     ax.set_ylim(bottom=y_min, top=y_max)
@@ -104,7 +125,7 @@ def plot_and_save_aggregated(
     y_min,
     y_max,
     decreasing,
-    label_offsets,
+    labels_to_offset,
     offset_values,
     only_posterior,
 ):
@@ -124,7 +145,7 @@ def plot_and_save_aggregated(
     _, ax = plt.subplots()
     ax.grid(axis="y", which="both", zorder=1, linewidth=0.5)
     # Set major ticks at every 0.1 and minor ticks at every 0.05
-    multiplier = 2 if "Rank" in suffix else 1
+    multiplier = 2 if ("Rank" in suffix or "rAULC" in suffix) else 1
     ax.yaxis.set_major_locator(MultipleLocator(0.1 * multiplier))
     ax.yaxis.set_minor_locator(MultipleLocator(0.05 * multiplier))
     # ax.yaxis.set_major_locator(MultipleLocator(0.5))
@@ -141,7 +162,8 @@ def plot_and_save_aggregated(
         fmt="none",
         ecolor=np.array([105.0, 109.0, 113.0]) / 255.0,
         elinewidth=1,
-        capsize=5,
+        capsize=4,
+        markeredgewidth=0.5,
         zorder=3,
     )
     ax.spines[["right", "top"]].set_visible(False)
@@ -150,9 +172,9 @@ def plot_and_save_aggregated(
     ax.set(xticklabels=[])
     ax.tick_params(bottom=False)
 
-    label_offset_dict = dict(zip(label_offsets, offset_values))
+    label_offset_dict = dict(zip(labels_to_offset, offset_values))
 
-    for bar, label in zip(bars, labels):
+    for bar, label, val in zip(bars, labels, best_values):
         if "$" in label:
             pattern = r"\$.*?\$"
 
@@ -166,7 +188,8 @@ def plot_and_save_aggregated(
         )  # Use the offset if available, otherwise default to 0.03
         ax.text(
             bar.get_x() + bar.get_width() / 2,
-            y_min + y_offset,  # Adjust the position using y_offset
+            # y_min + y_offset + (val if ("Mahalanobis" not in label) else 0),  # Adjust the position using y_offset
+            y_min + y_offset,
             label,
             ha="center",
             va="bottom",
@@ -206,10 +229,10 @@ def plot_and_save_aggregated(
         ]
 
         # Adding the legend with adjusted handlelength to make the patches more square-like
-        if "AUC" in suffix:
-            feed_dict = {"bbox_to_anchor": (1, 1.1)}
-        else:
-            feed_dict = {}
+        # if "AUC" in suffix or "AUROC" in suffix:
+        # else:
+        #     feed_dict = {}
+        feed_dict = {"bbox_to_anchor": (1, 1.13)}
         ax.legend(
             frameon=False,
             handles=legend_handles,
@@ -232,52 +255,36 @@ def main(args):
     wandb.login(key=wandb_key)
     api = wandb.Api()
 
-    if args.correct_auroc:
-
-        def func(x):
-            if isinstance(x, str):
-                return x
-            return max(x, 1 - x)
-
-    elif args.correct_abs:
-
-        def func(x):
-            if isinstance(x, str):
-                return x
-            return abs(x)
-
-    else:
-
-        def func(x):
-            return x
+    metric_id = args.metric
 
     for prefix in DATASET_CONVERSION_DICT_IMAGENET:
+        if metric_id == "auroc_oodness" and "mixed" not in prefix:
+            continue
+
         create_directory("results")
-        create_directory(f"results/{args.metric}")
-        create_directory(f"results/{args.metric}/{prefix.replace('/', '-')}")
+        create_directory(f"results/{metric_id}")
+        create_directory(f"results/{metric_id}/{prefix.replace('/', '-')}")
         aggregated_estimators = {}
         aggregated_estimators_mins_maxs = {}
 
         for method_id, method_name in tqdm(ID_TO_METHOD_IMAGENET.items()):
+            print(method_name)
             if args.only_posterior and method_name not in POSTERIOR_ESTIMATORS:
                 continue
 
             sweep = api.sweep(f"bmucsanyi/bias/{method_id}")
 
             metric = {}
-            suffix = args.metric
 
             for run in sweep.runs:
                 if run.state != "finished":
                     continue
-                for key in sorted(run.summary.keys()):
-                    if key.startswith(prefix) and key.endswith(suffix):
-                        stripped_key = key.replace(f"{prefix}_", "").replace(
-                            f"_{suffix}", ""
-                        )
 
-                        # if method_name == "DDU":
-                        #     print(key, "\t", stripped_key)
+                for key in sorted(run.summary.keys()):
+                    if key.startswith(prefix) and key.endswith(metric_id):
+                        stripped_key = key.replace(f"{prefix}_", "").replace(
+                            f"_{metric_id}", ""
+                        )
 
                         if "mixed" in stripped_key or not (
                             stripped_key in ESTIMATOR_CONVERSION_DICT
@@ -285,17 +292,10 @@ def main(args):
                         ):
                             continue
 
-                        if (
-                            ESTIMATOR_CONVERSION_DICT.get(stripped_key, "none")
-                            not in metric
-                        ):
-                            metric[
-                                ESTIMATOR_CONVERSION_DICT.get(stripped_key, "none")
-                            ] = [func(run.summary[key])]
+                        if stripped_key not in metric:
+                            metric[stripped_key] = [run.summary[key]]
                         else:
-                            metric[
-                                ESTIMATOR_CONVERSION_DICT.get(stripped_key, "none")
-                            ].append(func(run.summary[key]))
+                            metric[stripped_key].append(run.summary[key])
 
             save_path = (
                 f"results/{args.metric}/{prefix.replace('/', '-')}/"
@@ -314,39 +314,32 @@ def main(args):
                 args.y_max,
             )
 
-            if args.metric not in ESTIMATORLESS_METRICS:
+            if (
+                args.metric not in ESTIMATORLESS_METRICS
+                and metric_id not in CONSTRAINED_METRICS
+            ):
                 if method_name == "Corr. Pred.":
-                    aggregated_key = ESTIMATOR_CONVERSION_DICT["error_probabilities"]
+                    aggregated_key = "error_probabilities"
                 elif method_name == "Loss Pred.":
-                    aggregated_key = ESTIMATOR_CONVERSION_DICT["risk_values"]
+                    aggregated_key = "risk_values"
                 elif method_name == "Mahalanobis":
-                    aggregated_key = ESTIMATOR_CONVERSION_DICT["mahalanobis_values"]
+                    aggregated_key = "mahalanobis_values"
                 elif method_name == "DDU" and args.metric == "auroc_oodness":
-                    aggregated_key = ESTIMATOR_CONVERSION_DICT["gmm_neg_log_densities"]
+                    aggregated_key = "gmm_neg_log_densities"
                 else:
-                    aggregated_key = ESTIMATOR_CONVERSION_DICT.get(
-                        args.distributional_estimator
-                    )
+                    aggregated_key = None
             else:
                 aggregated_key = None
 
             if aggregated_key is None:
                 operator = min if args.decreasing else max
-                means = {
-                    key: np.mean(metric[key]) for key in metric if key not in GT_LABELS
-                }
+                means = {key: np.mean(metric[key]) for key in metric if "gt" not in key}
                 aggregated_key = operator(means.items(), key=lambda x: x[1])[0]
 
-            try:
-                aggregated_estimators[method_name] = np.mean(metric[aggregated_key])
-                aggregated_estimators_mins_maxs[method_name] = np.min(
-                    metric[aggregated_key]
-                ), np.max(metric[aggregated_key])
-            except KeyError:
-                continue
-
-        if not aggregated_estimators:
-            continue
+            aggregated_estimators[method_name] = np.mean(metric[aggregated_key])
+            aggregated_estimators_mins_maxs[method_name] = np.min(
+                metric[aggregated_key]
+            ), np.max(metric[aggregated_key])
 
         # Save the aggregated plot with min-max error bars
         aggregated_save_path = (
@@ -360,7 +353,7 @@ def main(args):
             args.y_min,
             args.y_max,
             args.decreasing,
-            args.label_offsets,
+            args.labels_to_offset,
             args.offset_values,
             args.only_posterior,
         )
@@ -374,11 +367,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "metric", type=str, help="Name of the metric to be used in the analysis."
     )
-    parser.add_argument("--distributional-estimator", type=str, default=None)
     parser.add_argument("--y-min", type=float, default=None, help="Minimum y value.")
     parser.add_argument("--y-max", type=float, default=None, help="Maximum y value.")
     parser.add_argument(
-        "--label-offsets",
+        "--labels-to-offset",
         nargs="*",
         default=[],
         help="List of labels that require y-offset adjustments.",
@@ -395,16 +387,6 @@ if __name__ == "__main__":
         action="store_true",
         default=False,
         help="Whether the metric is increasing or decreasing.",
-    )
-    parser.add_argument(
-        "--correct-auroc",
-        action="store_true",
-        default=False,
-    )
-    parser.add_argument(
-        "--correct-abs",
-        action="store_true",
-        default=False,
     )
     parser.add_argument(
         "--only-posterior",

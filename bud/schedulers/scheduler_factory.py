@@ -46,18 +46,6 @@ def scheduler_kwargs(cfg):
 
 
 def create_scheduler(
-    args,
-    optimizer: Optimizer,
-    updates_per_epoch: int = 0,
-):
-    return create_scheduler_v2(
-        optimizer=optimizer,
-        **scheduler_kwargs(args),
-        updates_per_epoch=updates_per_epoch,
-    )
-
-
-def create_scheduler_v2(
     optimizer: Optimizer,
     sched: str = "cosine",
     num_epochs: int = 300,

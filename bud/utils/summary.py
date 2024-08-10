@@ -2,7 +2,6 @@
 
 Hacked together by / Copyright 2020 Ross Wightman
 """
-import csv
 import os
 from collections import OrderedDict
 
@@ -29,34 +28,27 @@ def get_outdir(path, *paths, inc=False):
 
 
 def update_summary(
-    filename,
-    epoch,
-    train_metrics,
-    eval_metrics,
+    epoch=None,
+    train_metrics=None,
+    eval_metrics=None,
     best_eval_metrics=None,
-    test_metrics=None,
     best_test_metrics=None,
     lr=None,
-    write_header=False,
-    log_wandb=False,
 ):
-    rowd = OrderedDict(epoch=epoch)
+    rowd = OrderedDict()
+
+    if epoch is not None:
+        rowd["epoch"] = epoch
     if train_metrics is not None:
         rowd.update(train_metrics)
     if eval_metrics is not None:
         rowd.update(eval_metrics)
     if best_eval_metrics is not None:
         rowd.update([("best_" + k, v) for k, v in best_eval_metrics.items()])
-    if test_metrics is not None:
-        rowd.update(test_metrics)
     if best_test_metrics is not None:
         rowd.update([("best_" + k, v) for k, v in best_test_metrics.items()])
     if lr is not None:
         rowd["lr"] = lr
-    if log_wandb:
+
+    if rowd:
         wandb.log(rowd)
-    with open(filename, mode="a") as cf:
-        dw = csv.DictWriter(cf, fieldnames=rowd.keys())
-        if write_header:  # first iteration (epoch == 1 can't be used)
-            dw.writeheader()
-        dw.writerow(rowd)

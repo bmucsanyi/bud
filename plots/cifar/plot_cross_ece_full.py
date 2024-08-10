@@ -16,11 +16,9 @@ from utils import (
 
 from tueplots import bundles
 
-config = bundles.icml2024(family="serif", column="half", usetex=True)
-config["figure.figsize"] = (3.5, config["figure.figsize"][1])
-
+config = bundles.neurips2024()
+config["figure.figsize"] = (3.14, 2)
 plt.rcParams.update(config)
-
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
 
 
@@ -140,7 +138,7 @@ def main():
     ax.legend(
         [h[0] for h in handles],
         labels,
-        bbox_to_anchor=(1.4, 0.5),
+        bbox_to_anchor=(1.5, 0.5),
         loc="center right",
         frameon=False,
     )

@@ -1,40 +1,42 @@
 import os
 
 ID_TO_METHOD_CIFAR = {
-    "wl683ek8": "GP",
-    "3vnnnaix": "HET-XL",
-    "gypg5gc8": "CE Baseline",
-    "9jztoaos": "MC-Dropout",
-    "16k5i0w8": "SNGP",
-    "03coev3u": "DUQ",
-    "6r8nfwqc": "Shallow Ens.",
-    "960a6hfa": "Loss Pred.",
-    "xsvl0zop": "Corr. Pred.",
-    "ymq2jv64": "Deep Ens.",
-    "7kksw6rj": "Laplace",
-    "swr2k8kf": "Mahalanobis",
-    "n85ctsck": "Temperature",
-    "oj31fxin": "DDU",
-    "5bb431gk": "EDL",
-    "3lptxghb": "PostNet",
+    "82wiia5a": "GP",
+    "8pzbl9zq": "HET-XL",
+    "mj4gt28n": "CE Baseline",
+    "nwmia4kf": "MC-Dropout",
+    "b1dd9bjf": "SNGP",
+    "y0pqcyo0": "DUQ",
+    "k3v4wzua": "Shallow Ens.",
+    "t3j6wcsa": "Loss Pred.",
+    "ymlbxdms": "Corr. Pred.",
+    "yw72v367": "Deep Ens.",
+    "7irimi02": "Laplace",
+    "aeb5oky6": "Mahalanobis",
+    "5j5qcw9l": "Temperature",
+    "ipcewyua": "DDU",
+    "3l8nkci8": "HET",
+    "ihcciqqt": "EDL",
+    "c3wpoy10": "PostNet",
 }
 
 ID_TO_METHOD_IMAGENET = {
-    "46elax73": "GP",
-    "ktze6y0c": "HET-XL",
-    "3zt619eq": "CE Baseline",
-    "f52l00hb": "MC-Dropout",
-    "ew6b0m1x": "SNGP",
-    "795iqrk8": "Shallow Ens.",
-    "kl7436jj": "Loss Pred.",
-    "iskn1vp6": "Corr. Pred.",
-    "1nz1l6qj": "Deep Ens.",
-    "0qpln50b": "Laplace",
-    "mp53zl2m": "Mahalanobis",
-    "yxvvtw51": "Temperature",
-    "5exmovzc": "DDU",
-    "lr19ead6": "EDL",
-    "xsd2ro6c": "PostNet",
+    "0zh85pjp": "GP",
+    "n6ocb8vt": "HET-XL",
+    "75316qay": "CE Baseline",
+    "iphs7vdj": "MC-Dropout",
+    "5l11sz1l": "SNGP",
+    "50dvkkny": "Shallow Ens.",
+    "qthh97bn": "Loss Pred.",
+    "7bexzi5z": "Corr. Pred.",
+    "oyn8zlw5": "Deep Ens.",
+    "i170wvxa": "Laplace",
+    "iovcgd69": "Mahalanobis",
+    "9mqh7if3": "Temperature",
+    "n5g7bnct": "DDU",
+    "7yusrr4s": "HET",
+    "52ebshff": "EDL",
+    "g9v0j4p4": "PostNet",
 }
 
 DATASET_CONVERSION_DICT_IMAGENET = {
@@ -75,6 +77,7 @@ POSTERIOR_ESTIMATORS = [
     "Laplace",
     "EDL",
     "PostNet",
+    "HET",
 ]
 
 ESTIMATOR_CONVERSION_DICT = {
@@ -96,23 +99,35 @@ ESTIMATOR_CONVERSION_DICT = {
     "mahalanobis_values": r"$u^\text{mah}$",
     "risk_values": r"$u^\text{rp}$",
     "gmm_neg_log_densities": r"$u^\text{ddu}$",
-    "scaled_inverse_precisions": r"$\text{D-S}$",
     "dempster_shafer_values": r"$\text{D-S}$",
 }
 
-GT_LABELS = [
-    r"$\text{PU}^\text{b}$",
-    r"$\text{B}^\text{b}$",
-    r"$\text{AU}^\text{b} + \text{B}^\text{b}$",
-    r"$\text{AU}^\text{b}$",
-]
+# GT_LABELS = [
+#     r"$\text{PU}^\text{b}$",
+#     r"$\text{B}^\text{b}$",
+#     r"$\text{AU}^\text{b} + \text{B}^\text{b}$",
+#     r"$\text{AU}^\text{b}$",
+# ]
 
 ESTIMATORLESS_METRICS = [
-    "hard_bma_accuracy",
+    "hard_bma_accuracy_original",
     "rank_correlation_bma_au_eu",
+    "rank_correlation_bma_eu_pu",
+    "rank_correlation_bma_au_pu",
     "rank_correlation_bregman_au_b_fbar",
     "rank_correlation_bregman_eu_au_hat",
     "rank_correlation_bregman_au_eu",
+    "log_prob_score_hard_bma_aleatoric_original",
+    "brier_score_hard_fbar_aleatoric_original",
+]
+
+CONSTRAINED_METRICS = [
+    "ece_hard_bma_correctness_original",
+    "ece_soft_bma_correctness_original",
+    "brier_score_hard_bma_correctness_original",
+    "brier_score_soft_bma_correctness_original",
+    "log_prob_score_hard_bma_correctness_original",
+    "log_prob_score_soft_bma_correctness_original",
 ]
 
 

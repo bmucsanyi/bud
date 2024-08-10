@@ -17,7 +17,6 @@ from utils import (
 )
 
 plt.rcParams.update(bundles.icml2024(family="serif", column="half", usetex=True))
-
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
 
 

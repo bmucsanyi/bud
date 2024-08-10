@@ -1,3 +1,33 @@
+__all__ = [
+    "BaseCorrectnessPredictionWrapper",
+    "CorrectnessPredictionWrapper",
+    "DeepCorrectnessPredictionWrapper",
+    "TemperatureWrapper",
+    "DDUWrapper",
+    "DeepEnsembleWrapper",
+    "DeterministicWrapper",
+    "DropoutWrapper",
+    "DUQWrapper",
+    "calc_gradient_penalty",
+    "HETXLWrapper",
+    "LaplaceWrapper",
+    "MahalanobisWrapper",
+    "MCInfoNCEWrapper",
+    "ModelWrapper",
+    "PosteriorWrapper",
+    "SpecialWrapper",
+    "DirichletWrapper",
+    "NonIsotropicvMFWrapper",
+    "BaseLossPredictionWrapper",
+    "DeepLossPredictionWrapper",
+    "LossPredictionWrapper",
+    "ShallowEnsembleWrapper",
+    "SNGPWrapper",
+    "EDLWrapper",
+    "PostNetWrapper",
+    "HetClassNNWrapper",
+]
+
 from .correctness_prediction_wrapper import (
     BaseCorrectnessPredictionWrapper,
     CorrectnessPredictionWrapper,
@@ -5,12 +35,10 @@ from .correctness_prediction_wrapper import (
 )
 from .temperature_wrapper import TemperatureWrapper
 from .ddu_wrapper import DDUWrapper
-
-# from .ddu_wrapper import DDUWrapper
 from .deep_ensemble_wrapper import DeepEnsembleWrapper
 from .deterministic_wrapper import DeterministicWrapper
 from .dropout_wrapper import DropoutWrapper
-from .duq_wrapper import DUQWrapper
+from .duq_wrapper import DUQWrapper, calc_gradient_penalty
 from .hetxl_wrapper import HETXLWrapper
 from .laplace_wrapper import LaplaceWrapper
 from .mahalanobis_wrapper import MahalanobisWrapper
@@ -31,3 +59,4 @@ from .shallow_ensemble_wrapper import ShallowEnsembleWrapper
 from .sngp_wrapper import SNGPWrapper
 from .edl_wrapper import EDLWrapper
 from .postnet_wrapper import PostNetWrapper
+from .hetclassnn_wrapper import HetClassNNWrapper

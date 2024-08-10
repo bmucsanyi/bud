@@ -75,13 +75,13 @@ def type_from_string(type_string):
 
 
 def extract_layer_candidates(model, layertype=nn.ReLU):
-    relu_layers = []
+    layers_of_type = []
 
     for name, module in model.named_modules():
         if isinstance(module, layertype):
-            relu_layers.append((name, module))
+            layers_of_type.append((name, module))
 
-    return relu_layers
+    return layers_of_type
 
 
 def show_image_grid(img_tensors, mean, std, grid_size=(3, 3)):

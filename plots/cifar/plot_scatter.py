@@ -19,8 +19,8 @@ from utils import (
 from tueplots import bundles
 from tueplots.constants.color import rgb
 
-config = bundles.icml2024(family="serif", column="half", usetex=True)
-# config["figure.figsize"] = (3.25, 1.6)
+config = bundles.neurips2024()
+config["figure.figsize"] = (2.64, 2)
 
 plt.rcParams.update(config)
 
@@ -202,7 +202,7 @@ def plot_and_save_aggregated_shared_axes(
         handles=list(legend_handles.values()),
         labels=list(legend_handles.keys()),
         loc="center right",
-        bbox_to_anchor=(1.25, 0.55),
+        bbox_to_anchor=(1.35, 0.55),
         # borderpad=0.1,
         frameon=False,
     )

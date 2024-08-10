@@ -5,7 +5,7 @@ from tqdm import tqdm
 import wandb
 
 from tueplots import bundles
-from scipy.stats import pearsonr
+from scipy.stats import pearsonr, spearmanr
 import sys
 import json
 
@@ -16,14 +16,16 @@ from utils import (
     create_directory,
 )
 
-plt.rcParams.update(bundles.icml2024(family="serif", column="half", usetex=True))
-
+# plt.rcParams.update(bundles.icml2024(family="serif", column="half", usetex=True))
+plt.rcParams.update(bundles.neurips2024())
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
 
 
 def main():
-    # Add accuracy to estimator dict
-    ESTIMATOR_CONVERSION_DICT["hard_bma_accuracy"] = "none"
+    # Add to estimator dict
+    ESTIMATOR_CONVERSION_DICT["hard_bma_accuracy_original"] = "none"
+    ESTIMATOR_CONVERSION_DICT["log_prob_score_hard_bma_aleatoric_original"] = "none"
+    ESTIMATOR_CONVERSION_DICT["brier_score_hard_fbar_aleatoric_original"] = "none"
 
     with open("../../wandb_key.json") as f:
         wandb_key = json.load(f)["key"]
@@ -35,35 +37,42 @@ def main():
     create_directory("results/correlation_matrix")
 
     metric_dict = {
-        "log_prob_score_hard_bma_correctness": "Log Prob. Score",
-        "brier_score_hard_bma_correctness": "Brier Score",
-        "ece_hard_bma_correctness": "-ECE",
-        "auroc_hard_bma_correctness": "Correctness AUROC",
-        "cumulative_hard_bma_abstinence_auc": "Abstinence AUC",
-        "hard_bma_accuracy": "Accuracy",
+        "log_prob_score_hard_bma_correctness_original": "Correctness Log Prob.",
+        "ece_hard_bma_correctness_original": "-ECE",
+        "brier_score_hard_bma_correctness_original": "Correctness Brier",
+        "auroc_hard_bma_correctness_original": "Correctness AUROC",
+        "hard_bma_raulc_original": "rAULC",
+        "hard_bma_eaurc_original": "-E-AURC",
+        "cumulative_hard_bma_abstinence_auc_original": "AUAC",
+        "hard_bma_accuracy_original": "Accuracy",
+        "log_prob_score_hard_bma_aleatoric_original": "Aleatoric Log Prob.",
+        "brier_score_hard_fbar_aleatoric_original": "Aleatoric Brier",
         "rank_correlation_bregman_au": "Aleatoric Rank Corr.",
+        "auroc_multiple_labels": "Aleatoric AUROC",
         "auroc_oodness": "OOD AUROC",
     }
 
     id_to_method = {
-        "wl683ek8": "GP",
-        "3vnnnaix": "HET-XL",
-        "gypg5gc8": "CE Baseline",
-        "9jztoaos": "MC-Dropout",
-        "16k5i0w8": "SNGP",
-        "03coev3u": "DUQ",
-        "6r8nfwqc": "Shallow Ens.",
-        "xsvl0zop": "Corr. Pred.",
-        "ymq2jv64": "Deep Ens.",
-        "7kksw6rj": "Laplace",
-        "n85ctsck": "Temperature",
-        "oj31fxin": "DDU",
+        "82wiia5a": "GP",
+        "8pzbl9zq": "HET-XL",
+        "mj4gt28n": "CE Baseline",
+        "nwmia4kf": "MC-Dropout",
+        "b1dd9bjf": "SNGP",
+        "y0pqcyo0": "DUQ",
+        "k3v4wzua": "Shallow Ens.",
+        "t3j6wcsa": "Loss Pred.",
+        "ymlbxdms": "Corr. Pred.",
+        "yw72v367": "Deep Ens.",
+        "7irimi02": "Laplace",
+        "aeb5oky6": "Mahalanobis",
+        "5j5qcw9l": "Temperature",
+        "ipcewyua": "DDU",
+        "3l8nkci8": "HET",
     }
 
-    fig, ax = plt.subplots()
-
     performance_matrix = np.zeros((len(metric_dict), len(id_to_method), 3))
-    correlation_matrix = np.zeros((len(metric_dict), len(metric_dict)))
+    correlation_matrix_spearman = np.zeros((len(metric_dict), len(metric_dict)))
+    correlation_matrix_pearson = np.zeros((len(metric_dict), len(metric_dict)))
 
     id_prefix = "best_id_test"
     mixture_prefix = "best_ood_test_soft/cifar10S2_mixed_soft/cifar10"
@@ -104,13 +113,20 @@ def main():
                             else:
                                 estimator_dict[stripped_key].append(run.summary[key])
 
-                            if metric_name == "-ECE":
+                            if metric_name in ["-ECE", "-E-AURC"]:
                                 estimator_dict[stripped_key][-1] *= -1
 
                 for key in tuple(estimator_dict.keys()):
                     if "NaN" in estimator_dict[key]:
                         continue
                     estimator_dict[key] = np.mean(estimator_dict[key])
+
+                if "brier_score_hard_fbar_aleatoric_original" in estimator_dict:
+                    estimator_dict = {
+                        "brier_score_hard_fbar_aleatoric_original": estimator_dict[
+                            "brier_score_hard_fbar_aleatoric_original"
+                        ]
+                    }
 
                 if len(estimator_dict) > 1:
                     if method_name == "Corr. Pred.":
@@ -130,53 +146,60 @@ def main():
         for j in range(len(metric_dict)):
             perf_i = performance_matrix[i, :]
             perf_j = performance_matrix[j, :]
-            correlation_matrix[i, j] = pearsonr(perf_i, perf_j)[0]
+            correlation_matrix_spearman[i, j] = spearmanr(perf_i, perf_j)[0]
+            correlation_matrix_pearson[i, j] = pearsonr(perf_i, perf_j)[0]
 
-    # Choose a diverging colormap
-    cmap = plt.get_cmap("coolwarm")
+    correlation_matrices = [correlation_matrix_spearman, correlation_matrix_pearson]
+    names = ["correlation_matrix_spearman", "correlation_matrix_pearson"]
 
-    # Plot the heatmap, applying the mask
-    cax = ax.imshow(
-        correlation_matrix,
-        interpolation="nearest",
-        cmap=cmap,
-        vmin=-1,
-        vmax=1,  # Set the scale of the colormap from -1 to 1
-    )
+    for correlation_matrix, name in zip(correlation_matrices, names):
+        fig, ax = plt.subplots()
+        # Choose a diverging colormap
+        cmap = plt.get_cmap("coolwarm")
 
-    # Add colorbar
-    cbar = fig.colorbar(cax)
-    cbar.outline.set_visible(False)
-    cbar.ax.tick_params(width=0.1)
-    cbar.set_ticks([-0.983, 0, 1.01])
-    # cbar.set_ticklabels(["-1 (Neg. Corr.)", "0 (No Corr.)", "1 (Pos. Corr.)"])
-    cbar.set_ticklabels(["-1", "0", "1"])
+        # Plot the heatmap, applying the mask
+        cax = ax.imshow(
+            correlation_matrix,
+            interpolation="nearest",
+            cmap=cmap,
+            vmin=-1,
+            vmax=1,  # Set the scale of the colormap from -1 to 1
+        )
 
-    # Set ticks
-    ax.set_xticks(np.arange(len(metric_dict)))
-    ax.set_yticks(np.arange(len(metric_dict)))
+        # Add colorbar
+        cbar = fig.colorbar(cax, ax=ax, fraction=0.046, pad=0.04)
+        cbar.outline.set_visible(False)
+        cbar.ax.tick_params(width=0.1)
+        cbar.set_ticks([-0.983, 0, 1.01])
+        # cbar.set_ticklabels(["-1 (Neg. Corr.)", "0 (No Corr.)", "1 (Pos. Corr.)"])
+        cbar.set_ticklabels(["-1", "0", "1"])
 
-    # Set tick labels
-    ax.set_xticklabels(metric_dict.values())
-    ax.set_yticklabels(metric_dict.values())
+        # Set ticks
+        ax.set_xticks(np.arange(len(metric_dict)))
+        ax.set_yticks(np.arange(len(metric_dict)))
 
-    # Rotate the tick labels and set their alignment
-    plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+        # Set tick labels
+        ax.set_xticklabels(metric_dict.values())
+        ax.set_yticklabels(metric_dict.values())
 
-    # Loop over data dimensions and create text annotations for only the lower triangle
-    for i in range(len(metric_dict)):
-        for j in range(len(metric_dict)):
-            ax.text(
-                j,
-                i,
-                round(correlation_matrix[i, j], 2),
-                ha="center",
-                va="center",
-                color="black",
-                fontsize=5,
-            )
-    ax.spines[["right", "top"]].set_visible(False)
-    plt.savefig("results/correlation_matrix/correlation_matrix.pdf")
+        # Rotate the tick labels and set their alignment
+        plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+        # plt.setp(ax.get_yticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+
+        # Loop over data dimensions and create text annotations for only the lower triangle
+        for i in range(len(metric_dict)):
+            for j in range(len(metric_dict)):
+                ax.text(
+                    j,
+                    i,
+                    round(correlation_matrix[i, j], 2),
+                    ha="center",
+                    va="center",
+                    color="black",
+                    fontsize=5,
+                )
+        ax.spines[["right", "top"]].set_visible(False)
+        plt.savefig(f"results/correlation_matrix/{name}.pdf")
 
 
 if __name__ == "__main__":

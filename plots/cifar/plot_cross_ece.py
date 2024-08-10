@@ -16,11 +16,9 @@ from utils import (
 
 from tueplots import bundles
 
-config = bundles.icml2024(family="serif", column="half", usetex=True)
-config["figure.figsize"] = (3.25, 0.98)
-
+config = bundles.neurips2024()
+config["figure.figsize"] = (2.64, 0.98)
 plt.rcParams.update(config)
-
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
 
 
@@ -32,15 +30,11 @@ def main():
     api = wandb.Api()
 
     id_to_method = {
-        # "2vkuhe38": "GP",
-        # "f32n7c05": "SNGP",
-        # "ymq2jv64": "Deep Ensemble",
-        # "9jztoaos": "MC-Dropout",
-        # "gypg5gc8": "CE Baseline",
-        "wl683ek8": "GP",
-        "ymq2jv64": "Deep Ens.",
-        "n85ctsck": "Temperature",
-        "gypg5gc8": "CE Baseline",
+        "82wiia5a": "GP",
+        "b1dd9bjf": "SNGP",
+        "yw72v367": "Deep Ens.",
+        "5j5qcw9l": "Temperature",
+        "mj4gt28n": "CE Baseline",
     }
 
     dataset_conversion_dict = {
@@ -88,7 +82,7 @@ def main():
         ece_list = []
 
         sweep = api.sweep(f"bmucsanyi/bias/{method_id}")
-        suffix_ece = "ece_hard_bma_correctness"
+        suffix_ece = "ece_hard_bma_correctness_original"
 
         for prefix in dataset_conversion_dict:
             ece_dict = {}
@@ -163,7 +157,13 @@ def main():
     ax.spines[["right", "top"]].set_visible(False)
     ax.set_ylabel(r"ECE $\downarrow$")
     ax.set_ylim([0, 0.1])
-    ax.legend(frameon=False, ncols=1, fontsize="xx-small")
+    ax.legend(
+        frameon=False,
+        ncols=1,
+        fontsize="xx-small",
+        loc="upper left",
+        bbox_to_anchor=(0, 1.1),
+    )
 
     ax.set_xticks(np.arange(2))
     ax.set_xticklabels(["ID", "OOD Severity 1"])

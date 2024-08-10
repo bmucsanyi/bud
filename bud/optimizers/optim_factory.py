@@ -181,18 +181,7 @@ def optimizer_kwargs(cfg):
     return kwargs
 
 
-def create_optimizer(args, model, filter_bias_and_bn=True):
-    """Legacy optimizer factory for backwards compatibility.
-    NOTE: Use create_optimizer_v2 for new code.
-    """
-    return create_optimizer_v2(
-        model,
-        **optimizer_kwargs(cfg=args),
-        filter_bias_and_bn=filter_bias_and_bn,
-    )
-
-
-def create_optimizer_v2(
+def create_optimizer(
     model_or_params,
     opt: str = "sgd",
     lr: Optional[float] = None,

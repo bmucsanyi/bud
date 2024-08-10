@@ -108,12 +108,6 @@ class CheckpointSaver:
                     os.remove(best_save_path)
                 os.link(last_save_path, best_save_path)
 
-        return (
-            (None, None)
-            if self.best_metric is None
-            else (self.best_metric, self.best_epoch)
-        )
-
     def _save(self, save_path, epoch, metric=None):
         save_state = {
             "epoch": epoch,

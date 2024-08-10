@@ -8,7 +8,6 @@ import torch
 
 __all__ = [
     "is_exportable",
-    "is_scriptable",
     "is_no_jit",
     "use_fused_attn",
     "set_exportable",
@@ -28,9 +27,6 @@ _NO_ACTIVATION_JIT = False
 
 # Set to True if exporting a model with Same padding via ONNX
 _EXPORTABLE = False
-
-# Set to True if wanting to use torch.jit.script on a model
-_SCRIPTABLE = False
 
 
 # use torch.scaled_dot_product_attention where possible
@@ -81,10 +77,6 @@ class set_exportable:
         return False
 
 
-def is_scriptable():
-    return _SCRIPTABLE
-
-
 class set_scriptable:
     def __init__(self, mode: bool) -> None:
         global _SCRIPTABLE
@@ -107,7 +99,6 @@ class set_layer_config:
 
     def __init__(
         self,
-        scriptable: Optional[bool] = None,
         exportable: Optional[bool] = None,
         no_jit: Optional[bool] = None,
         no_activation_jit: Optional[bool] = None,
@@ -117,8 +108,6 @@ class set_layer_config:
         global _NO_JIT
         global _NO_ACTIVATION_JIT
         self.prev = _SCRIPTABLE, _EXPORTABLE, _NO_JIT, _NO_ACTIVATION_JIT
-        if scriptable is not None:
-            _SCRIPTABLE = scriptable
         if exportable is not None:
             _EXPORTABLE = exportable
         if no_jit is not None:

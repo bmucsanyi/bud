@@ -30,7 +30,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torchvision.utils
 import yaml
 from torch.nn.parallel import DistributedDataParallel as NativeDDP
 import json
@@ -67,9 +66,9 @@ from bud.models import (
     resume_checkpoint,
     safe_model_name,
 )
-from bud.optimizers import create_optimizer_v2, optimizer_kwargs
-from bud.schedulers import create_scheduler_v2, scheduler_kwargs
-from bud.utils import ApexScaler, NativeScaler, type_from_string
+from bud.optimizers import create_optimizer, optimizer_kwargs
+from bud.schedulers import create_scheduler, scheduler_kwargs
+from bud.utils import NativeScaler, type_from_string
 from bud.wrappers import (
     TemperatureWrapper,
     DUQWrapper,
@@ -80,17 +79,9 @@ from bud.wrappers import (
     NonIsotropicvMFWrapper,
     SNGPWrapper,
     PostNetWrapper,
+    calc_gradient_penalty,
 )
 from validate import evaluate, evaluate_bulk
-
-try:
-    from apex import amp
-    from apex.parallel import DistributedDataParallel as ApexDDP
-    from apex.parallel import convert_syncbn_model
-
-    has_apex = True
-except ImportError:
-    has_apex = False
 
 has_native_amp = False
 try:
@@ -387,6 +378,15 @@ group.add_argument(
     default=10,
     type=int,
     help="number of Monte Carlo samples in the uncertainty method (default: 10)",
+)
+group.add_argument(
+    "--num-integral-mc-samples",
+    default=1000,
+    type=int,
+    help=(
+        "number of Monte Carlo samples to integrate out the logits with the diagonal "
+        "Gaussian in the heteroscedastic classification NN method (default: 1000)",
+    ),
 )
 group.add_argument(
     "--num-mc-samples-cv",
@@ -837,13 +837,7 @@ group.add_argument(
 group.add_argument("--model-kwargs", default={}, action=utils.ParseKwargs, type=str)
 
 # Scripting / codegen
-scripting_group = group.add_mutually_exclusive_group()
-scripting_group.add_argument(
-    "--torchscript",
-    dest="torchscript",
-    action="store_true",
-    help="torch.jit.script the full model",
-)
+scripting_group = group.add_argument_group("Scripting")
 scripting_group.add_argument(
     "--torchcompile",
     nargs="?",
@@ -1397,31 +1391,16 @@ group.add_argument(
     help="how many training processes to use (default: 4)",
 )
 group.add_argument(
-    "--save-images",
-    action="store_true",
-    default=False,
-    help="save images of input batches every log interval for debugging (default: False)",
-)
-group.add_argument(
     "--amp",
     action="store_true",
     default=False,
-    help=(
-        "use NVIDIA Apex AMP or Native AMP for mixed precision training "
-        "(default: True)"
-    ),
+    help=("use Native AMP for mixed precision training " "(default: True)"),
 )
 group.add_argument(
     "--amp-dtype",
     default="float16",
     type=str,
     help="lower precision AMP dtype (default: float16)",
-)
-group.add_argument(
-    "--amp-impl",
-    default="native",
-    type=str,
-    help='AMP impl to use, "native" or "apex" (default: "native")',
 )
 group.add_argument(
     "--no-ddp-bb",
@@ -1590,20 +1569,13 @@ def main():
                 "Metrics not being logged to wandb, try `pip install wandb`"
             )
 
-    # Resolve AMP arguments based on PyTorch / Apex availability
-    use_amp = None
+    # Resolve AMP arguments based on PyTorch
+    use_amp = args.amp
     amp_dtype = torch.float16
-    if args.amp:
-        if args.amp_impl == "apex":
-            assert has_apex, "AMP impl specified as APEX but APEX is not installed."
-            use_amp = "apex"
-            assert args.amp_dtype == "float16"
-        else:
-            assert (
-                has_native_amp
-            ), "Please update PyTorch to a version with native AMP (or use APEX)."
-            use_amp = "native"
-            assert args.amp_dtype in ("float16", "bfloat16")
+    if use_amp:
+        assert has_native_amp, "Please update PyTorch to a version with native AMP."
+        assert args.amp_dtype in ("float16", "bfloat16")
+
         if args.amp_dtype == "bfloat16":
             amp_dtype = torch.bfloat16
 
@@ -1624,7 +1596,6 @@ def main():
         model_name=args.model,
         model_wrapper_name=args.method,
         pretrained=args.pretrained,
-        scriptable=args.torchscript,
         weight_paths=args.weight_paths,
         num_hidden_features=args.num_hidden_features,
         is_reset_classifier=args.is_reset_classifier,
@@ -1636,6 +1607,7 @@ def main():
         dropout_probability=args.dropout_probability,
         is_filterwise_dropout=args.is_filterwise_dropout,
         num_mc_samples=args.num_mc_samples,
+        num_integral_mc_samples=args.num_integral_mc_samples,
         num_mc_samples_cv=args.num_mc_samples_cv,
         rbf_length_scale=args.rbf_length_scale,
         ema_momentum=args.ema_momentum,
@@ -1727,13 +1699,8 @@ def main():
     # Setup synchronized BatchNorm for distributed training
     if args.distributed and args.sync_bn:
         args.dist_bn = ""  # Disable dist_bn when sync BN active
-        assert not args.split_bn
-        if has_apex and use_amp == "apex":
-            # Apex SyncBN used with Apex AMP
-            # WARNING this won't currently work with models using BatchNormAct2d
-            model = convert_syncbn_model(model)
-        else:
-            model = convert_sync_batchnorm(model)
+        model = convert_sync_batchnorm(model)
+
         if utils.is_primary(args):
             logger.info(
                 "Converted model to use Synchronized BatchNorm. "
@@ -1741,12 +1708,6 @@ def main():
                 "zero initialized BN layers (enabled by default for ResNets) "
                 "while sync-bn enabled."
             )
-
-    if args.torchscript:
-        assert not args.torchcompile
-        assert not use_amp == "apex", "Cannot use APEX AMP with torchscripted model"
-        assert not args.sync_bn, "Cannot use SyncBatchNorm with torchscripted model"
-        model = torch.jit.script(model)
 
     # if not args.lr:
     if args.lr is None:
@@ -1767,7 +1728,7 @@ def main():
                 f"({global_batch_size}) with {args.lr_base_scale} scaling."
             )
 
-    optimizer = create_optimizer_v2(
+    optimizer = create_optimizer(
         model,
         **optimizer_kwargs(cfg=args),
         **args.opt_kwargs,
@@ -1776,13 +1737,8 @@ def main():
     # Setup automatic mixed-precision (AMP) loss scaling and op casting
     amp_autocast = suppress  # Do nothing
     loss_scaler = None
-    if use_amp == "apex":
-        assert device.type == "cuda"
-        model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
-        loss_scaler = ApexScaler()
-        if utils.is_primary(args):
-            logger.info("Using NVIDIA APEX AMP. Training in mixed precision.")
-    elif use_amp == "native":
+
+    if use_amp:
         try:
             amp_autocast = partial(
                 torch.autocast, device_type=device.type, dtype=amp_dtype
@@ -1813,17 +1769,11 @@ def main():
 
     # Setup distributed training
     if args.distributed:
-        if has_apex and use_amp == "apex":
-            # Apex DDP preferred unless native amp is activated
-            if utils.is_primary(args):
-                logger.info("Using NVIDIA APEX DistributedDataParallel.")
-            model = ApexDDP(model, delay_allreduce=True)
-        else:
-            if utils.is_primary(args):
-                logger.info("Using native Torch DistributedDataParallel.")
-            model = NativeDDP(
-                model, device_ids=[device], broadcast_buffers=not args.no_ddp_bb
-            )
+        if utils.is_primary(args):
+            logger.info("Using native Torch DistributedDataParallel.")
+        model = NativeDDP(
+            model, device_ids=[device], broadcast_buffers=not args.no_ddp_bb
+        )
         # NOTE: EMA model does not need to be wrapped by DDP
 
     if args.torchcompile:
@@ -1834,133 +1784,6 @@ def main():
         )
         # model = torch.compile(model, backend=args.torchcompile)
         model.model = torch.compile(model.model)
-    # Create the train dataset
-    dataset_train = create_dataset(
-        name=args.dataset,
-        root=args.data_dir,
-        split=args.train_split,
-        is_training=True,
-        class_map=args.class_map,
-        download=args.dataset_download,
-        batch_size=args.batch_size,
-        seed=args.seed,
-        repeats=args.epoch_repeats,
-    )
-
-    # Create the eval datasets
-    num_eval_workers = 1
-
-    if args.ood_transforms_test == []:
-        args.ood_transforms_test = args.ood_transforms_eval
-
-    dataset_id_eval = create_dataset(
-        name=args.dataset_id,
-        root=args.data_dir_id,
-        label_root=args.soft_imagenet_label_dir,
-        is_evaluate_on_all_splits_id=args.is_evaluate_on_all_splits_id,
-        split=args.val_split,
-        download=args.dataset_download,
-        class_map=args.class_map,
-        batch_size=args.batch_size,
-        is_training=False,
-    )
-
-    dataset_id_eval_hard = create_dataset(
-        name=args.dataset_id,
-        root=args.data_dir_id,
-        label_root=args.soft_imagenet_label_dir,
-        is_evaluate_on_all_splits_id=args.is_evaluate_on_all_splits_id,
-        split=args.val_split,
-        download=args.dataset_download,
-        class_map=args.class_map,
-        batch_size=args.batch_size,
-        is_training=False,
-    )
-
-    def hard_target_transform(target):
-        if isinstance(target, (np.ndarray, torch.Tensor)):  # Soft dataset
-            return target[-1]  # Last entry contains hard label
-
-        return target
-
-    dataset_id_eval_hard.target_transform = hard_target_transform
-
-    if args.ood_transforms_eval:
-        dataset_locations_ood_eval = {}
-        for severity in range(1, 6):
-            dataset_locations_ood_eval[f"{args.dataset_id}S{severity}"] = (
-                args.data_dir_id,
-                num_eval_workers,
-            )
-
-        dataset_locations_ood_test = {}
-        for severity in range(1, 6):
-            dataset_locations_ood_test[f"{args.dataset_id}S{severity}"] = (
-                args.data_dir_id,
-                num_eval_workers,
-            )
-
-    dataset_locations_zero_shot_test = {}
-    for dataset in args.dataset_zero_shot:
-        dataset_locations_zero_shot_test[dataset] = (
-            args.data_dir_zero_shot,
-            num_eval_workers,
-        )
-
-    if args.ood_transforms_eval:
-        datasets_ood_eval = {}
-        for name, (location, num_workers) in dataset_locations_ood_eval.items():
-            dataset = create_dataset(
-                name=name[:-2],
-                root=location,
-                label_root=args.soft_imagenet_label_dir,
-                split=args.val_split,
-                download=args.dataset_download,
-                class_map=args.class_map,
-                batch_size=args.batch_size,
-                is_training=False,
-            )
-            datasets_ood_eval[name] = (dataset, num_workers)
-
-    dataset_id_test = create_dataset(
-        name=args.dataset_id,
-        root=args.data_dir_id,
-        label_root=args.soft_imagenet_label_dir,
-        split=args.test_split,
-        download=args.dataset_download,
-        class_map=args.class_map,
-        batch_size=args.batch_size,
-        is_training=False,
-    )
-
-    if args.ood_transforms_eval:
-        datasets_ood_test = {}
-        for name, (location, num_workers) in dataset_locations_ood_test.items():
-            dataset = create_dataset(
-                name=name[:-2],
-                root=location,
-                label_root=args.soft_imagenet_label_dir,
-                split=args.test_split,
-                download=args.dataset_download,
-                class_map=args.class_map,
-                batch_size=args.batch_size,
-                is_training=False,
-            )
-            datasets_ood_test[name] = (dataset, num_workers)
-
-    datasets_zero_shot_test = {}
-    for name, (location, num_workers) in dataset_locations_zero_shot_test.items():
-        dataset = create_dataset(
-            name=name,
-            root=location,
-            label_root=args.soft_imagenet_label_dir,
-            split=args.test_split_zero_shot,
-            download=args.dataset_download,
-            class_map=args.class_map,
-            batch_size=args.batch_size,
-            is_training=False,
-        )
-        datasets_zero_shot_test[name] = (dataset, num_workers)
 
     # Setup mixup / cutmix
     collate_fn = None
@@ -1985,167 +1808,24 @@ def main():
         else:
             mixup_fn = Mixup(**mixup_args)
 
-    # Wrap dataset in AugMix helper
-    if num_aug_splits > 1:
-        dataset_train = AugMixDataset(dataset_train, num_splits=num_aug_splits)
-
-    # Create data loaders w/ augmentation pipeiine
-    train_interpolation = args.train_interpolation
-    if args.no_aug or not train_interpolation:
-        train_interpolation = data_config["interpolation"]
-
-    loader_train = create_loader(
-        dataset_train,
-        dataset_name=args.dataset,
-        input_size=data_config["input_size"],
-        batch_size=args.batch_size,
-        padding=args.padding,
-        is_training=True,
-        use_prefetcher=args.prefetcher,
-        no_aug=args.no_aug,
-        re_prob=args.reprob,
-        re_mode=args.remode,
-        re_count=args.recount,
-        re_split=args.resplit,
-        scale=args.scale,
-        ratio=args.ratio,
-        hflip=args.hflip,
-        vflip=args.vflip,
-        color_jitter=args.color_jitter,
-        auto_augment=args.aa,
-        num_aug_repeats=args.aug_repeats,
-        num_aug_splits=num_aug_splits,
-        interpolation=train_interpolation,
-        mean=data_config["mean"],  # from --mean
-        std=data_config["std"],  # from --std
-        num_workers=args.workers,
-        distributed=args.distributed,
-        collate_fn=collate_fn,
-        pin_memory=args.pin_mem,
+    (
+        loader_train,
+        loader_id_eval,
+        loader_id_eval_hard,
+        loaders_ood_eval,
+        loader_id_test,
+        loaders_ood_test,
+        loaders_zero_shot_test,
+    ) = create_loaders(
+        data_config=data_config,
+        args=args,
         device=device,
-        use_multi_epochs_loader=args.use_multi_epochs_loader,
-        worker_seeding=args.worker_seeding,
-        prepare_n_crop_transform=(
-            prepare_n_crop_transform if args.method == "mcinfonce" else None
-        ),
+        num_aug_splits=num_aug_splits,
+        collate_fn=collate_fn,
     )
 
     if isinstance(model, PostNetWrapper):
         model.calculate_sample_counts(loader_train)
-
-    loader_id_eval = create_loader(
-        dataset_id_eval,
-        dataset_name=args.dataset_id,
-        input_size=data_config["input_size"],
-        batch_size=args.validation_batch_size or args.batch_size,
-        is_training=False,
-        use_prefetcher=args.prefetcher,
-        interpolation=data_config["interpolation"],
-        mean=data_config["mean"],
-        std=data_config["std"],
-        num_workers=num_eval_workers,
-        distributed=args.distributed,
-        crop_pct=data_config["crop_pct"],
-        pin_memory=args.pin_mem,
-        device=device,
-    )
-
-    loader_id_eval_hard = create_loader(
-        dataset_id_eval_hard,
-        dataset_name=args.dataset_id,
-        input_size=data_config["input_size"],
-        batch_size=args.validation_batch_size or args.batch_size,
-        is_training=False,
-        use_prefetcher=args.prefetcher,
-        interpolation=data_config["interpolation"],
-        mean=data_config["mean"],
-        std=data_config["std"],
-        num_workers=num_eval_workers,
-        distributed=args.distributed,
-        crop_pct=data_config["crop_pct"],
-        pin_memory=args.pin_mem,
-        device=device,
-    )
-
-    if args.ood_transforms_eval:
-        loaders_ood_eval = {}
-        for name, (dataset, num_workers) in datasets_ood_eval.items():
-            loaders_ood_eval[name] = create_loader(
-                dataset,
-                dataset_name=name,
-                input_size=data_config["input_size"],
-                batch_size=args.validation_batch_size or args.batch_size,
-                is_training=False,
-                use_prefetcher=args.prefetcher,
-                interpolation=data_config["interpolation"],
-                mean=data_config["mean"],
-                std=data_config["std"],
-                num_workers=num_eval_workers,
-                distributed=args.distributed,
-                crop_pct=data_config["crop_pct"],
-                pin_memory=args.pin_mem,
-                device=device,
-                ood_transforms=args.ood_transforms_eval,
-                severity=int(name[-1]),
-            )
-
-    loader_id_test = create_loader(
-        dataset_id_test,
-        dataset_name=args.dataset_id,
-        input_size=data_config["input_size"],
-        batch_size=args.validation_batch_size or args.batch_size,
-        is_training=False,
-        use_prefetcher=args.prefetcher,
-        interpolation=data_config["interpolation"],
-        mean=data_config["mean"],
-        std=data_config["std"],
-        num_workers=num_eval_workers,
-        distributed=args.distributed,
-        crop_pct=data_config["crop_pct"],
-        pin_memory=args.pin_mem,
-        device=device,
-    )
-
-    if args.ood_transforms_eval:
-        loaders_ood_test = {}
-        for name, (dataset, num_workers) in datasets_ood_test.items():
-            loaders_ood_test[name] = create_loader(
-                dataset,
-                dataset_name=name,
-                input_size=data_config["input_size"],
-                batch_size=args.validation_batch_size or args.batch_size,
-                is_training=False,
-                use_prefetcher=args.prefetcher,
-                interpolation=data_config["interpolation"],
-                mean=data_config["mean"],
-                std=data_config["std"],
-                num_workers=num_eval_workers,
-                distributed=args.distributed,
-                crop_pct=data_config["crop_pct"],
-                pin_memory=args.pin_mem,
-                device=device,
-                ood_transforms=args.ood_transforms_test,
-                severity=int(name[-1]),
-            )
-
-    loaders_zero_shot_test = {}
-    for name, (dataset, num_workers) in datasets_zero_shot_test.items():
-        loaders_zero_shot_test[name] = create_loader(
-            dataset,
-            dataset_name=name,
-            input_size=data_config["input_size"],
-            batch_size=args.validation_batch_size or args.batch_size,
-            is_training=False,
-            use_prefetcher=args.prefetcher,
-            interpolation=data_config["interpolation"],
-            mean=data_config["mean"],
-            std=data_config["std"],
-            num_workers=num_eval_workers,
-            distributed=args.distributed,
-            crop_pct=data_config["crop_pct"],
-            pin_memory=args.pin_mem,
-            device=device,
-        )
 
     # Initialize uncertainty module
     if (
@@ -2217,12 +1897,17 @@ def main():
     # Setup checkpoint saver and eval metric tracking
     eval_metric = args.eval_metric
 
-    assert eval_metric.startswith("id_eval_") and eval_metric.endswith("_auroc_hard_bma_correctness")
+    if not (
+        eval_metric.startswith("id_eval_")
+        and eval_metric.endswith("_auroc_hard_bma_correctness")
+    ):
+        raise ValueError(
+            "Invalid eval metric name specified: "
+            'must be "id_eval_<estimator>_auroc_hard_bma_correctness'
+        )
 
-    best_metric = None
     best_eval_metric = float("inf") if args.decreasing else -float("inf")
     best_eval_metrics = None
-    best_test_metrics = None
     best_epoch = None
     saver = None
     output_dir = None
@@ -2255,6 +1940,7 @@ def main():
             decreasing=decreasing,
             max_history=args.checkpoint_hist,
         )
+
         with open(os.path.join(output_dir, "args.yaml"), "w") as f:
             f.write(args_text)
 
@@ -2262,7 +1948,7 @@ def main():
     updates_per_epoch = (
         len(loader_train) + args.accumulation_steps - 1
     ) // args.accumulation_steps
-    lr_scheduler, num_epochs = create_scheduler_v2(
+    lr_scheduler, num_epochs = create_scheduler(
         optimizer,
         **scheduler_kwargs(args),
         updates_per_epoch=updates_per_epoch,
@@ -2291,169 +1977,72 @@ def main():
     )
 
     try:
-        for epoch in range(start_epoch, num_epochs + 1):
-            if hasattr(dataset_train, "set_epoch"):
-                dataset_train.set_epoch(epoch)
+        for epoch in range(start_epoch, num_epochs):
+            if hasattr(loader_train.dataset, "set_epoch"):
+                loader_train.dataset.set_epoch(epoch)
             elif args.distributed and hasattr(loader_train.sampler, "set_epoch"):
                 loader_train.sampler.set_epoch(epoch)
 
-            if args.lr > 0 and epoch != num_epochs:
-                train_metrics = train_one_epoch(
-                    epoch,
-                    model,
-                    loader_train,
-                    optimizer,
-                    train_loss_fn,
-                    args,
-                    device=device,
-                    lr_scheduler=lr_scheduler,
-                    saver=saver,
-                    output_dir=output_dir,
-                    amp_autocast=amp_autocast,
-                    loss_scaler=loss_scaler,
-                    mixup_fn=mixup_fn,
-                )
+            train_metrics = train_one_epoch(
+                epoch=epoch,
+                model=model,
+                loader=loader_train,
+                optimizer=optimizer,
+                loss_fn=train_loss_fn,
+                args=args,
+                device=device,
+                lr_scheduler=lr_scheduler,
+                saver=saver,
+                amp_autocast=amp_autocast,
+                loss_scaler=loss_scaler,
+                mixup_fn=mixup_fn,
+            )
 
-                eval_metrics = evaluate(
-                    model=model,
-                    loader=loader_id_eval,
-                    device=device,
-                    amp_autocast=amp_autocast,
-                    key_prefix="id_eval",
-                    temp_folder=output_dir,
-                    is_same_task=True,
-                    is_upstream=True,
-                    args=args,
-                )
+            eval_metrics = evaluate(
+                model=model,
+                loader=loader_id_eval,
+                device=device,
+                amp_autocast=amp_autocast,
+                key_prefix="id_eval",
+                temp_folder=output_dir,
+                is_same_task=True,
+                is_upstream=True,
+                args=args,
+            )
 
-                logger.info(f"{eval_metric}: {eval_metrics[eval_metric]}")
+            logger.info(f"{eval_metric}: {eval_metrics[eval_metric]}")
 
-                is_new_best = (args.lr == 0 and epoch == 0) or (
-                    epoch >= args.best_save_start_epoch
-                    and (
-                        (decreasing and eval_metrics[eval_metric] < best_eval_metric)
-                        or (
-                            (not decreasing)
-                            and eval_metrics[eval_metric] > best_eval_metric
-                        )
-                    )
-                )
+            is_new_best = epoch >= args.best_save_start_epoch and (
+                (decreasing and eval_metrics[eval_metric] < best_eval_metric)
+                or ((not decreasing) and eval_metrics[eval_metric] > best_eval_metric)
+            )
 
-                if is_new_best:
-                    best_eval_metric = eval_metrics[eval_metric]
-                    best_eval_metrics = eval_metrics
-            elif args.lr == 0 and epoch == 0:  # Post-hoc method
-                logger.info("Learning rate is 0, skipping training epoch.")
-                train_metrics = None
-                eval_metrics = None
-            elif args.lr > 0 and epoch == num_epochs and args.is_evaluate_on_test_sets:
-                best_save_path = os.path.join(
-                    saver.checkpoint_dir, "model_best" + saver.extension
-                )
-                checkpoint = torch.load(best_save_path, map_location="cpu")
-                state_dict = checkpoint["state_dict"]
-                model.load_state_dict(state_dict, strict=True)
-                train_metrics = None
-                eval_metrics = None
-            else:
-                break
+            if is_new_best:
+                best_eval_metric = eval_metrics[eval_metric]
+                best_eval_metrics = eval_metrics
+                best_epoch = epoch
 
             if args.distributed and args.dist_bn in ("broadcast", "reduce"):
                 if utils.is_primary(args):
                     logger.info("Distributing BatchNorm running means and vars")
                 utils.distribute_bn(model, args.world_size, args.dist_bn == "reduce")
 
-            if args.is_evaluate_on_test_sets and (
-                (args.lr > 0 and epoch == num_epochs) or (args.lr == 0 and epoch == 0)
-            ):
-                update_post_hoc_method(
-                    model,
-                    loader_train,
-                    loader_id_eval_hard,
-                    loaders_ood_eval[f"{args.dataset_id}S2"],
-                    args,
-                )
-
-                model.eval()
-
-                if isinstance(model, DDUWrapper):
-                    model.fit_gmm(loader_train, args.max_num_id_train_samples)
-
-                if (
-                    isinstance(model, (DDUWrapper, TemperatureWrapper))
-                    and args.is_temperature_scaled
-                ):
-                    model.set_temperature_loader(loader_id_eval_hard)
-
-                logger.info(f"Testing best model at epoch {epoch}.")
-                # Only for the best model track the test scores
-                best_test_metrics = evaluate(
-                    model=model,
-                    loader=loader_id_test,
-                    device=device,
-                    amp_autocast=amp_autocast,
-                    key_prefix="id_test",
-                    temp_folder=output_dir,
-                    is_same_task=True,
-                    is_upstream=True,
-                    args=args,
-                )
-
-                if args.ood_transforms_eval:
-                    best_test_metrics.update(
-                        evaluate_bulk(
-                            model=model,
-                            loaders=loaders_ood_test,
-                            device=device,
-                            amp_autocast=amp_autocast,
-                            key_prefix="ood_test",
-                            temp_folder=output_dir,
-                            is_same_task=True,
-                            is_upstream=False,
-                            args=args,
-                        )
-                    )
-
-                if len(loaders_zero_shot_test) > 0:
-                    best_test_metrics.update(
-                        evaluate_bulk(
-                            model=model,
-                            loaders=loaders_zero_shot_test,
-                            device=device,
-                            amp_autocast=amp_autocast,
-                            key_prefix="zero_shot_test",
-                            temp_folder=output_dir,
-                            is_same_task=False,
-                            is_upstream=False,
-                            args=args,
-                        )
-                    )
-
-            if output_dir is not None:
+            if args.log_wandb and has_wandb:
                 lrs = [param_group["lr"] for param_group in optimizer.param_groups]
                 utils.update_summary(
-                    filename=os.path.join(output_dir, "summary.csv"),
                     epoch=epoch,
                     train_metrics=train_metrics,
                     eval_metrics=eval_metrics,
                     best_eval_metrics=best_eval_metrics,
-                    best_test_metrics=best_test_metrics,
                     lr=sum(lrs) / len(lrs),
-                    write_header=best_metric is None,
-                    log_wandb=args.log_wandb and has_wandb,
                 )
 
-            if (
-                saver is not None
-                and eval_metrics is not None
-            ):
+            if saver is not None and epoch >= args.best_save_start_epoch:
                 # Save proper checkpoint with eval metric
                 save_metric = eval_metrics[eval_metric]
-                best_metric, best_epoch = saver.save_checkpoint(
-                    epoch, metric=save_metric
-                )
+                saver.save_checkpoint(epoch, metric=save_metric)
 
-            if lr_scheduler is not None and eval_metrics is not None:
+            if lr_scheduler is not None:
                 # Step LR for next epoch
                 lr_scheduler.step(epoch + 1, eval_metrics[eval_metric])
 
@@ -2464,11 +2053,422 @@ def main():
             )
             time_start_epoch = time_end_epoch
 
+        if args.is_evaluate_on_test_sets:
+            logger.info("Starting final tests.")
+
+            if num_epochs > 0:  # No post-hoc method, load best checkpoint first
+                best_save_path = os.path.join(
+                    saver.checkpoint_dir, "model_best" + saver.extension
+                )
+                checkpoint = torch.load(best_save_path, map_location="cpu")
+                state_dict = checkpoint["state_dict"]
+                model.load_state_dict(state_dict, strict=True)
+
+            time_start_test = datetime.now()
+
+            model.eval()
+
+            update_post_hoc_method(
+                model=model,
+                loader_train=loader_train,
+                loader_id_eval_hard=loader_id_eval_hard,
+                loader_ood_eval=loaders_ood_eval[f"{args.dataset_id}S2"],
+                args=args,
+            )
+
+            best_test_metrics = evaluate_on_test_sets(
+                model,
+                loader_id_test,
+                loaders_ood_test,
+                loaders_zero_shot_test,
+                device,
+                amp_autocast,
+                output_dir,
+                args,
+            )
+
+            lrs = [param_group["lr"] for param_group in optimizer.param_groups]
+
+            if args.log_wandb and has_wandb:
+                utils.update_summary(
+                    best_test_metrics=best_test_metrics,
+                    lr=sum(lrs) / len(lrs),
+                )
+
+            time_end_test = datetime.now()
+            logger.info(
+                f"Tests took "
+                f"{(time_end_test - time_start_test).total_seconds()} seconds"
+            )
     except KeyboardInterrupt:
         pass
 
-    if best_metric is not None:
-        logger.info(f"*** Best metric: {best_metric} (epoch {best_epoch})")
+    if num_epochs > 0:
+        logger.info(f"*** Best eval metric: {best_eval_metric} (epoch {best_epoch})")
+
+
+def evaluate_on_test_sets(
+    model,
+    loader_id_test,
+    loaders_ood_test,
+    loaders_zero_shot_test,
+    device,
+    amp_autocast,
+    output_dir,
+    args,
+):
+    best_test_metrics = evaluate(
+        model=model,
+        loader=loader_id_test,
+        device=device,
+        amp_autocast=amp_autocast,
+        key_prefix="id_test",
+        temp_folder=output_dir,
+        is_same_task=True,
+        is_upstream=True,
+        args=args,
+    )
+
+    best_test_metrics |= evaluate_bulk(
+        model=model,
+        loaders=loaders_ood_test,
+        device=device,
+        amp_autocast=amp_autocast,
+        key_prefix="ood_test",
+        temp_folder=output_dir,
+        is_same_task=True,
+        is_upstream=False,
+        args=args,
+    )
+
+    if len(loaders_zero_shot_test) > 0:
+        best_test_metrics.update(
+            evaluate_bulk(
+                model=model,
+                loaders=loaders_zero_shot_test,
+                device=device,
+                amp_autocast=amp_autocast,
+                key_prefix="zero_shot_test",
+                temp_folder=output_dir,
+                is_same_task=False,
+                is_upstream=False,
+                args=args,
+            )
+        )
+
+    return best_test_metrics
+
+
+def create_datasets(args, num_aug_splits):
+    # Create the train dataset
+    dataset_train = create_dataset(
+        name=args.dataset,
+        root=args.data_dir,
+        split=args.train_split,
+        is_training=True,
+        class_map=args.class_map,
+        download=args.dataset_download,
+        batch_size=args.batch_size,
+        seed=args.seed,
+        repeats=args.epoch_repeats,
+    )
+
+    # Create the eval datasets
+    if not args.ood_transforms_eval:
+        raise ValueError("A non-empty list of OOD transforms must be specified.")
+
+    if not args.ood_transforms_test:
+        args.ood_transforms_test = args.ood_transforms_eval
+
+    dataset_id_eval = create_dataset(
+        name=args.dataset_id,
+        root=args.data_dir_id,
+        label_root=args.soft_imagenet_label_dir,
+        is_evaluate_on_all_splits_id=args.is_evaluate_on_all_splits_id,
+        split=args.val_split,
+        download=args.dataset_download,
+        class_map=args.class_map,
+        batch_size=args.batch_size,
+        is_training=False,
+    )
+
+    dataset_id_eval_hard = create_dataset(
+        name=args.dataset_id,
+        root=args.data_dir_id,
+        label_root=args.soft_imagenet_label_dir,
+        is_evaluate_on_all_splits_id=args.is_evaluate_on_all_splits_id,
+        split=args.val_split,
+        download=args.dataset_download,
+        class_map=args.class_map,
+        batch_size=args.batch_size,
+        is_training=False,
+    )
+
+    def hard_target_transform(target):
+        if isinstance(target, (np.ndarray, torch.Tensor)):  # Soft dataset
+            return target[-1]  # Last entry contains hard label
+
+        return target
+
+    dataset_id_eval_hard.target_transform = hard_target_transform
+
+    dataset_locations_ood_eval = {}
+    for severity in range(1, 6):
+        dataset_locations_ood_eval[f"{args.dataset_id}S{severity}"] = (
+            args.data_dir_id,
+        )
+
+    dataset_locations_ood_test = {}
+    for severity in range(1, 6):
+        dataset_locations_ood_test[f"{args.dataset_id}S{severity}"] = args.data_dir_id
+
+    dataset_locations_zero_shot_test = {}
+    for dataset in args.dataset_zero_shot:
+        dataset_locations_zero_shot_test[dataset] = args.data_dir_zero_shot
+
+    datasets_ood_eval = {}
+    for name, location in dataset_locations_ood_eval.items():
+        dataset = create_dataset(
+            name=name[:-2],
+            root=location,
+            label_root=args.soft_imagenet_label_dir,
+            split=args.val_split,
+            download=args.dataset_download,
+            class_map=args.class_map,
+            batch_size=args.batch_size,
+            is_training=False,
+        )
+        datasets_ood_eval[name] = dataset
+
+    dataset_id_test = create_dataset(
+        name=args.dataset_id,
+        root=args.data_dir_id,
+        label_root=args.soft_imagenet_label_dir,
+        split=args.test_split,
+        download=args.dataset_download,
+        class_map=args.class_map,
+        batch_size=args.batch_size,
+        is_training=False,
+    )
+
+    datasets_ood_test = {}
+    for name, location in dataset_locations_ood_test.items():
+        dataset = create_dataset(
+            name=name[:-2],
+            root=location,
+            label_root=args.soft_imagenet_label_dir,
+            split=args.test_split,
+            download=args.dataset_download,
+            class_map=args.class_map,
+            batch_size=args.batch_size,
+            is_training=False,
+        )
+        datasets_ood_test[name] = dataset
+
+    datasets_zero_shot_test = {}
+    for name, location in dataset_locations_zero_shot_test.items():
+        dataset = create_dataset(
+            name=name,
+            root=location,
+            label_root=args.soft_imagenet_label_dir,
+            split=args.test_split_zero_shot,
+            download=args.dataset_download,
+            class_map=args.class_map,
+            batch_size=args.batch_size,
+            is_training=False,
+        )
+        datasets_zero_shot_test[name] = dataset
+
+    # Wrap dataset in AugMix helper
+    if num_aug_splits > 1:
+        dataset_train = AugMixDataset(dataset_train, num_splits=num_aug_splits)
+
+    return (
+        dataset_train,
+        dataset_id_eval,
+        dataset_id_eval_hard,
+        datasets_ood_eval,
+        dataset_id_test,
+        datasets_ood_test,
+        datasets_zero_shot_test,
+    )
+
+
+def create_loaders(data_config, args, device, num_aug_splits, collate_fn):
+    (
+        dataset_train,
+        dataset_id_eval,
+        dataset_id_eval_hard,
+        datasets_ood_eval,
+        dataset_id_test,
+        datasets_ood_test,
+        datasets_zero_shot_test,
+    ) = create_datasets(args, num_aug_splits)
+
+    # Create data loaders w/ augmentation pipeline
+    num_eval_workers = 1
+    train_interpolation = args.train_interpolation
+
+    if args.no_aug or not train_interpolation:
+        train_interpolation = data_config["interpolation"]
+
+    loader_train = create_loader(
+        dataset_train,
+        dataset_name=args.dataset,
+        input_size=data_config["input_size"],
+        batch_size=args.batch_size,
+        padding=args.padding,
+        is_training=True,
+        use_prefetcher=args.prefetcher,
+        no_aug=args.no_aug,
+        re_prob=args.reprob,
+        re_mode=args.remode,
+        re_count=args.recount,
+        re_split=args.resplit,
+        scale=args.scale,
+        ratio=args.ratio,
+        hflip=args.hflip,
+        vflip=args.vflip,
+        color_jitter=args.color_jitter,
+        auto_augment=args.aa,
+        num_aug_repeats=args.aug_repeats,
+        num_aug_splits=num_aug_splits,
+        interpolation=train_interpolation,
+        mean=data_config["mean"],  # from --mean
+        std=data_config["std"],  # from --std
+        num_workers=args.workers,
+        distributed=args.distributed,
+        collate_fn=collate_fn,
+        pin_memory=args.pin_mem,
+        device=device,
+        use_multi_epochs_loader=args.use_multi_epochs_loader,
+        worker_seeding=args.worker_seeding,
+        prepare_n_crop_transform=(
+            prepare_n_crop_transform if args.method == "mcinfonce" else None
+        ),
+    )
+
+    loader_id_eval = create_loader(
+        dataset_id_eval,
+        dataset_name=args.dataset_id,
+        input_size=data_config["input_size"],
+        batch_size=args.validation_batch_size or args.batch_size,
+        is_training=False,
+        use_prefetcher=args.prefetcher,
+        interpolation=data_config["interpolation"],
+        mean=data_config["mean"],
+        std=data_config["std"],
+        num_workers=num_eval_workers,
+        distributed=args.distributed,
+        crop_pct=data_config["crop_pct"],
+        pin_memory=args.pin_mem,
+        device=device,
+    )
+
+    loader_id_eval_hard = create_loader(
+        dataset_id_eval_hard,
+        dataset_name=args.dataset_id,
+        input_size=data_config["input_size"],
+        batch_size=args.validation_batch_size or args.batch_size,
+        is_training=False,
+        use_prefetcher=args.prefetcher,
+        interpolation=data_config["interpolation"],
+        mean=data_config["mean"],
+        std=data_config["std"],
+        num_workers=num_eval_workers,
+        distributed=args.distributed,
+        crop_pct=data_config["crop_pct"],
+        pin_memory=args.pin_mem,
+        device=device,
+    )
+
+    loaders_ood_eval = {}
+    for name, dataset in datasets_ood_eval.items():
+        loaders_ood_eval[name] = create_loader(
+            dataset,
+            dataset_name=name,
+            input_size=data_config["input_size"],
+            batch_size=args.validation_batch_size or args.batch_size,
+            is_training=False,
+            use_prefetcher=args.prefetcher,
+            interpolation=data_config["interpolation"],
+            mean=data_config["mean"],
+            std=data_config["std"],
+            num_workers=num_eval_workers,
+            distributed=args.distributed,
+            crop_pct=data_config["crop_pct"],
+            pin_memory=args.pin_mem,
+            device=device,
+            ood_transforms=args.ood_transforms_eval,
+            severity=int(name[-1]),
+        )
+
+    loader_id_test = create_loader(
+        dataset_id_test,
+        dataset_name=args.dataset_id,
+        input_size=data_config["input_size"],
+        batch_size=args.validation_batch_size or args.batch_size,
+        is_training=False,
+        use_prefetcher=args.prefetcher,
+        interpolation=data_config["interpolation"],
+        mean=data_config["mean"],
+        std=data_config["std"],
+        num_workers=num_eval_workers,
+        distributed=args.distributed,
+        crop_pct=data_config["crop_pct"],
+        pin_memory=args.pin_mem,
+        device=device,
+    )
+
+    loaders_ood_test = {}
+    for name, dataset in datasets_ood_test.items():
+        loaders_ood_test[name] = create_loader(
+            dataset,
+            dataset_name=name,
+            input_size=data_config["input_size"],
+            batch_size=args.validation_batch_size or args.batch_size,
+            is_training=False,
+            use_prefetcher=args.prefetcher,
+            interpolation=data_config["interpolation"],
+            mean=data_config["mean"],
+            std=data_config["std"],
+            num_workers=num_eval_workers,
+            distributed=args.distributed,
+            crop_pct=data_config["crop_pct"],
+            pin_memory=args.pin_mem,
+            device=device,
+            ood_transforms=args.ood_transforms_test,
+            severity=int(name[-1]),
+        )
+
+    loaders_zero_shot_test = {}
+    for name, dataset in datasets_zero_shot_test.items():
+        loaders_zero_shot_test[name] = create_loader(
+            dataset,
+            dataset_name=name,
+            input_size=data_config["input_size"],
+            batch_size=args.validation_batch_size or args.batch_size,
+            is_training=False,
+            use_prefetcher=args.prefetcher,
+            interpolation=data_config["interpolation"],
+            mean=data_config["mean"],
+            std=data_config["std"],
+            num_workers=num_eval_workers,
+            distributed=args.distributed,
+            crop_pct=data_config["crop_pct"],
+            pin_memory=args.pin_mem,
+            device=device,
+        )
+
+    return (
+        loader_train,
+        loader_id_eval,
+        loader_id_eval_hard,
+        loaders_ood_eval,
+        loader_id_test,
+        loaders_ood_test,
+        loaders_zero_shot_test,
+    )
 
 
 def train_one_epoch(
@@ -2481,7 +2481,6 @@ def train_one_epoch(
     device=torch.device("cuda"),
     lr_scheduler=None,
     saver=None,
-    output_dir=None,
     amp_autocast=suppress,
     loss_scaler=None,
     mixup_fn=None,
@@ -2627,14 +2626,6 @@ def train_one_epoch(
                     f"Data: {data_time_m.val:.3f} ({data_time_m.avg:.3f})"
                 )
 
-                if args.save_images and output_dir:
-                    torchvision.utils.save_image(
-                        input,
-                        os.path.join(output_dir, "train-batch-%d.jpg" % batch_idx),
-                        padding=0,
-                        normalize=True,
-                    )
-
         if (
             saver is not None
             and args.recovery_interval
@@ -2647,37 +2638,11 @@ def train_one_epoch(
 
         update_sample_count = 0
         data_start_time = time.time()
-        # end for
 
     if hasattr(optimizer, "sync_lookahead"):
         optimizer.sync_lookahead()
 
     return OrderedDict([("loss", losses_m.avg)])
-
-
-def calc_gradients_input(x, pred):
-    gradients = torch.autograd.grad(
-        outputs=pred,
-        inputs=x,
-        grad_outputs=torch.ones_like(pred),
-        retain_graph=True,  # Graph still needed for loss backprop
-    )[0]
-
-    gradients = gradients.flatten(start_dim=1)
-
-    return gradients
-
-
-def calc_gradient_penalty(x, pred):
-    gradients = calc_gradients_input(x, pred)
-
-    # L2 norm
-    grad_norm = gradients.norm(2, dim=1)
-
-    # Two-sided penalty
-    gradient_penalty = (grad_norm - 1).square().mean()
-
-    return gradient_penalty
 
 
 def update_post_hoc_method(
@@ -2687,14 +2652,12 @@ def update_post_hoc_method(
         assert (
             loader_id_eval_hard is not None
         ), "For Laplace approximation, the ID eval loader has to be specified."
-        model.eval()
         model.perform_laplace_approximation(loader_train, loader_id_eval_hard)
     elif isinstance(model, MahalanobisWrapper):
         assert (
             loader_id_eval_hard is not None and loader_ood_eval is not None
         ), "For the Mahalanobis method, the ID and OOD eval loaders have to be specified."
         torch.set_grad_enabled(mode=False)
-        model.eval()
         model.train_logistic_regressor(
             loader_train,
             loader_id_eval_hard,
@@ -2703,6 +2666,10 @@ def update_post_hoc_method(
             args.max_num_id_ood_train_samples,
         )
         torch.set_grad_enabled(mode=True)
+    elif isinstance(model, DDUWrapper):
+        model.fit_gmm(loader_train, args.max_num_id_train_samples)
+    elif isinstance(model, TemperatureWrapper) and args.is_temperature_scaled:
+        model.set_temperature_loader(loader_id_eval_hard)
 
 
 if __name__ == "__main__":

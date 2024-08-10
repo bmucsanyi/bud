@@ -173,3 +173,28 @@ class DUQWrapper(SpecialWrapper):
         out = self.get_classifier()(features)
 
         return out
+
+
+def calc_gradients_input(x, pred):
+    gradients = torch.autograd.grad(
+        outputs=pred,
+        inputs=x,
+        grad_outputs=torch.ones_like(pred),
+        retain_graph=True,  # Graph still needed for loss backprop
+    )[0]
+
+    gradients = gradients.flatten(start_dim=1)
+
+    return gradients
+
+
+def calc_gradient_penalty(x, pred):
+    gradients = calc_gradients_input(x, pred)
+
+    # L2 norm
+    grad_norm = gradients.norm(2, dim=1)
+
+    # Two-sided penalty
+    gradient_penalty = (grad_norm - 1).square().mean()
+
+    return gradient_penalty

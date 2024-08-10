@@ -10,8 +10,9 @@ sys.path.insert(0, "..")
 from utils import ID_TO_METHOD_IMAGENET, create_directory
 from tueplots import bundles
 
-config = bundles.icml2024(family="serif", column="half", usetex=True)
-config["figure.figsize"] = (3.25, 1.7)
+config = bundles.neurips2024()
+# config["figure.figsize"] = (2.64, 1.3)
+config["figure.figsize"] = (2.64, 1.7)
 plt.rcParams.update(config)
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
 
@@ -54,8 +55,8 @@ def main():
 
     for method_id, method_name in tqdm(ID_TO_METHOD_IMAGENET.items()):
         sweep = api.sweep(f"bmucsanyi/bias/{method_id}")
-        suffix_correctness = "auroc_hard_bma_correctness"
-        suffix_abstinence = "cumulative_hard_bma_abstinence_auc"
+        suffix_correctness = "auroc_hard_bma_correctness_original"
+        suffix_abstinence = "cumulative_hard_bma_abstinence_auc_original"
 
         num_successful_runs = sum(1 for run in sweep.runs if run.state == "finished")
         auroc_correctness_matrix = np.zeros(
@@ -74,7 +75,7 @@ def main():
             else:
                 key_auroc = "_one_minus_max_probs_of_bma_"
 
-            key_accuracy = "_hard_bma_accuracy"
+            key_accuracy = "_hard_bma_accuracy_original"
 
             i = 0
             for run in sweep.runs:
@@ -165,7 +166,7 @@ def main():
             (1 - means_accuracy) ** (-1) * (means_auc_abstinence - means_accuracy),
             yerr=(1 - means_accuracy) ** (-1) * np.array(error_bars_auc_abstinence),
             fmt="-o",
-            label="AUC Abstinence",
+            label="AUAC",
             color=default_colors[1],
             markersize=3,
             ecolor=np.array([105.0, 109.0, 113.0]) / 255.0,
@@ -220,8 +221,9 @@ def main():
             handles,
             labels,
             frameon=False,
-            # loc="lower left",
-            # bbox_to_anchor=(-0.02, -0.1),
+            fontsize="x-small",
+            loc="lower left",
+            bbox_to_anchor=(-0.02, -0.1),
         )
         plt.grid(True, linewidth=0.5)
         plt.savefig(save_path)

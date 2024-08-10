@@ -18,7 +18,7 @@ python plot_cross.py
 
 python plot_cross_top5.py
 
-python plot_half.py "Rank Correlation" "rank_correlation_bregman_au" --y-min=0 --y-max=1 --correct-abs --label-offsets Mahalanobis --offset-values 0.16
+python plot_half.py "Rank Corr." "rank_correlation_bregman_au" --y-min=0 --y-max=0.81 --label-offsets Mahalanobis --offset-values 0.06
 
 python plot_half.py "Rank Correlation" "rank_correlation_bregman_b_fbar" --y-min=0 --y-max=1 --correct-abs --label-offsets Mahalanobis --offset-values 0.16
 

@@ -10,8 +10,8 @@ sys.path.insert(0, "..")
 from utils import ID_TO_METHOD_IMAGENET, create_directory
 from tueplots import bundles
 
-config = bundles.icml2024(family="serif", column="half", usetex=True)
-config["figure.figsize"] = (3.25, 0.98)
+config = bundles.neurips2024()
+config["figure.figsize"] = (2.64, 0.98)
 plt.rcParams.update(config)
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
 

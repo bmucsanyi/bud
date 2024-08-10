@@ -22,9 +22,8 @@ from utils import (
 from tueplots import bundles
 from matplotlib.ticker import MultipleLocator
 
-config = bundles.icml2024(family="serif", column="half", usetex=True)
-config["figure.figsize"] = (3.25, 0.98)
-
+config = bundles.neurips2024()
+config["figure.figsize"] = (2.64, 0.9)
 plt.rcParams.update(config)
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
 
@@ -148,7 +147,8 @@ def plot_and_save_aggregated(
         fmt="none",
         ecolor=np.array([105.0, 109.0, 113.0]) / 255.0,
         elinewidth=1,
-        capsize=5,
+        capsize=4,
+        markeredgewidth=0.5,
         zorder=3,
     )
     ax.spines[["right", "top"]].set_visible(False)
@@ -169,7 +169,7 @@ def plot_and_save_aggregated(
             processed_label = label
 
         y_offset = label_offset_dict.get(
-            processed_label, 0.03
+            processed_label, 0.01
         )  # Use the offset if available, otherwise default to 0.03
         ax.text(
             bar.get_x() + bar.get_width() / 2,
@@ -213,6 +213,7 @@ def plot_and_save_aggregated(
         loc="upper right",
         fontsize="small",
         handlelength=1,
+        ncol=2,
     )
 
     ax.set_ylim(bottom=0.5, top=1)

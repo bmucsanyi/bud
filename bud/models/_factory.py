@@ -16,6 +16,7 @@ from bud.wrappers import (
     HETXLWrapper,
     LaplaceWrapper,
     MahalanobisWrapper,
+    HetClassNNWrapper,
     MCInfoNCEWrapper,
     NonIsotropicvMFWrapper,
     LossPredictionWrapper,
@@ -78,7 +79,6 @@ def create_model(
     model_name: str,
     model_wrapper_name: str,
     pretrained: bool,
-    scriptable: Optional[bool],
     weight_paths,
     num_hidden_features,
     is_reset_classifier,
@@ -90,6 +90,7 @@ def create_model(
     dropout_probability,
     is_filterwise_dropout,
     num_mc_samples,
+    num_integral_mc_samples,
     num_mc_samples_cv,
     rbf_length_scale,
     ema_momentum,
@@ -148,8 +149,6 @@ def create_model(
         loss_regressor_feature_depth: Depth of features [0, 1] in the network to attach
             the loss-regressor to.
         pretrained: If set to `True`, load pretrained ImageNet-1k weights.
-        scriptable: Set layer config so that model is jit scriptable (not working for all
-            models yet).
         checkpoint_path: Path of checkpoint to load _after_ the model is initialized.
         pretrained_cfg: Pass in an external pretrained_cfg for model.
         pretrained_cfg_overlay: Replace key-values in base pretrained_cfg with these.
@@ -207,7 +206,7 @@ def create_model(
         raise RuntimeError(f"Unknown model ({model_name})")
 
     create_fn = model_entrypoint(model_name)
-    with set_layer_config(scriptable=scriptable, exportable=exportable, no_jit=no_jit):
+    with set_layer_config(exportable=exportable, no_jit=no_jit):
         model = create_fn(
             pretrained=pretrained,
             pretrained_cfg=pretrained_cfg,
@@ -231,6 +230,7 @@ def create_model(
         dropout_probability=dropout_probability,
         is_filterwise_dropout=is_filterwise_dropout,
         num_mc_samples=num_mc_samples,
+        num_integral_mc_samples=num_integral_mc_samples,
         num_mc_samples_cv=num_mc_samples_cv,
         rbf_length_scale=rbf_length_scale,
         ema_momentum=ema_momentum,
@@ -285,6 +285,7 @@ def wrap_model(
     dropout_probability,
     is_filterwise_dropout,
     num_mc_samples,
+    num_integral_mc_samples,
     num_mc_samples_cv,
     rbf_length_scale,
     ema_momentum,
@@ -398,6 +399,14 @@ def wrap_model(
             num_hooks=num_hooks,
             module_type=module_type,
             module_name_regex=module_name_regex,
+        )
+    elif model_wrapper_name == "hetclassnn":
+        wrapped_model = HetClassNNWrapper(
+            model=model,
+            dropout_probability=dropout_probability,
+            is_filterwise_dropout=is_filterwise_dropout,
+            num_mc_samples=num_mc_samples,
+            num_integral_mc_samples=num_integral_mc_samples,
         )
     elif model_wrapper_name == "mcinfonce":
         wrapped_model = MCInfoNCEWrapper(
