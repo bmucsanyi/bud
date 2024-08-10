@@ -9,12 +9,12 @@ import torch
 __all__ = [
     "is_exportable",
     "is_no_jit",
-    "use_fused_attn",
     "set_exportable",
-    "set_scriptable",
-    "set_no_jit",
-    "set_layer_config",
     "set_fused_attn",
+    "set_layer_config",
+    "set_no_jit",
+    "set_scriptable",
+    "use_fused_attn",
 ]
 
 # Set to True if prefer to have layers with no jit optimization (includes activations)

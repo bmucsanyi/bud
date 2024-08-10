@@ -12,7 +12,6 @@ from .cond_conv2d import CondConv2d, get_condconv_initializer
 from .config import (
     is_exportable,
     is_no_jit,
-    is_scriptable,
     set_exportable,
     set_fused_attn,
     set_layer_config,
