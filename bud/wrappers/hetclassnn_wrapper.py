@@ -36,7 +36,7 @@ class HetClassNNWrapper(PosteriorWrapper):
         dropout_probability: float,
         is_filterwise_dropout: bool,
         num_mc_samples: int,
-        num_integral_mc_samples: int,  # TODO: wire up
+        num_integral_mc_samples: int,
     ):
         super().__init__(model)
 
@@ -54,7 +54,11 @@ class HetClassNNWrapper(PosteriorWrapper):
             partial(ActivationDropout, dropout_probability, is_filterwise_dropout),
         )
 
-        self.reset_classifier(model.num_classes)
+        self.log_var = nn.Linear(
+            in_features=self.model.num_features, out_features=self.model.num_classes
+        )
+        nn.init.normal_(self.log_var.weight, mean=0, std=0.01)
+        nn.init.zeros_(self.log_var.bias)
         self.eps = 1e-10
 
     def forward(self, inputs):
@@ -98,7 +102,7 @@ class HetClassNNWrapper(PosteriorWrapper):
         )  # [B, C]
         logits = self.model.fc(
             pre_logits
-        )  # [B, C] TODO: breaks for ViTs (self.model.head)
+        )  # [B, C]  # TODO: breaks for ViTs (self.model.head)
         variances = self.log_var(pre_logits).exp()  # [B, C]
         stds = variances.sqrt()  # [B, C]
 
@@ -118,6 +122,8 @@ class HetClassNNWrapper(PosteriorWrapper):
         self.log_var = nn.Linear(
             in_features=self.num_features, out_features=num_classes
         )
+        nn.init.normal_(self.log_var.weight, mean=0, std=0.01)
+        nn.init.zeros_(self.log_var.bias)
         self.model.reset_classifier(num_classes, *args, **kwargs)
 
     def forward_features(self, inputs):
