@@ -111,6 +111,9 @@ ESTIMATOR_CONVERSION_DICT = {
 
 ESTIMATORLESS_METRICS = [
     "hard_bma_accuracy_original",
+    "correlation_bma_au_eu",
+    "correlation_bma_eu_pu",
+    "correlation_bma_au_pu",
     "rank_correlation_bma_au_eu",
     "rank_correlation_bma_eu_pu",
     "rank_correlation_bma_au_pu",

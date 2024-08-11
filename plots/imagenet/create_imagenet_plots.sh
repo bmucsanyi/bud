@@ -20,15 +20,15 @@ python plot_cross_top5.py
 
 python plot_half.py "Rank Corr." "rank_correlation_bregman_au" --y-min=0 --y-max=0.81 --label-offsets Mahalanobis --offset-values 0.06
 
-python plot_half.py "Rank Correlation" "rank_correlation_bregman_b_fbar" --y-min=0 --y-max=1 --correct-abs --label-offsets Mahalanobis --offset-values 0.16
+python plot_half.py "Rank Correlation" "rank_correlation_bregman_b_fbar" --y-min=0 --y-max=1 --label-offsets Mahalanobis --offset-values 0.16
 
 python plot_laplace_au.py --label-offsets Mahalanobis --offset-values 0.16
 
-python plot_half.py "Rank Correlation" "rank_correlation_bma_au_eu" --y-min=0 --y-max=1 --decreasing --correct-abs --only-posterior
+python plot_half.py "Rank Correlation" "rank_correlation_bma_au_eu" --y-min=0 --y-max=1 --decreasing --only-posterior
 
-python plot_half.py "Rank Correlation" "rank_correlation_bregman_eu_au_hat" --y-min=0 --y-max=1 --decreasing --correct-abs --only-posterior
+python plot_half.py "Rank Correlation" "rank_correlation_bregman_eu_au_hat" --y-min=0 --y-max=1 --decreasing --only-posterior
 
-python plot_half.py "Rank Correlation" "rank_correlation_bregman_au_b_fbar" --y-min=0 --y-max=1 --decreasing --correct-abs
+python plot_half.py "Rank Correlation" "rank_correlation_bregman_au_b_fbar" --y-min=0 --y-max=1 --decreasing
 
 python plot_correlation_matrix_flatten.py
 
@@ -36,4 +36,4 @@ python plot_cross_ece.py
 
 python plot_half.py "ECE" "ece_hard_bma_correctness" --y-min=0 --y-max=0.25 --decreasing --label-offsets SNGP GP MC-Dropout "Shallow Ens." "Deep Ens." "CE Baseline" "HET-XL" Laplace "Corr. Pred." --offset-values 0.02 0.02 0.04 0.06 0.003 0.003 0.003 0.003 0.003
 
-python plot_half.py "Rank Correlation" "rank_correlation_bregman_au_eu" --y-min=0 --y-max=1 --decreasing --correct-abs --only-posterior
+python plot_half.py "Rank Correlation" "rank_correlation_bregman_au_eu" --y-min=0 --y-max=1 --decreasing --only-posterior

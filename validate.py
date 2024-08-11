@@ -164,7 +164,7 @@ def evaluate(
 
     if is_test:
         ood_prefix = "id" if is_upstream else "ood"
-        save_prefix = f"{ood_prefix}_test_{loader_name.replace("/", "_")}_"
+        save_prefix = f"{ood_prefix}_test_{loader_name.replace('/', '_')}_"
 
         metrics = evaluate_on_tasks(
             model=model,
