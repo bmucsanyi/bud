@@ -353,7 +353,7 @@ def evaluate(
                 )
 
         ood_prefix = "id" if is_upstream else "ood"
-        save_prefix = f"{ood_prefix}_test_{loader_name}_mixed_{args.dataset_id}_"
+        save_prefix = f"{ood_prefix}_test_{loader_name}_mixed_{args.dataset_id.replace('/', '_')}_"
 
         metrics = evaluate_on_tasks(
             model=model,
@@ -576,11 +576,11 @@ def evaluate_on_correctness_prediction(
         ] = calculate_auroc(
             estimate, gt_zero_shot_correctnesses_original, args, soft=False
         ).item()
-        metrics[f"{key_prefix}{estimator_name}_auroc_zero_shot_correctness"] = (
-            calculate_auroc(
-                estimate, gt_zero_shot_correctnesses, args, soft=False
-            ).item()
-        )
+        metrics[
+            f"{key_prefix}{estimator_name}_auroc_zero_shot_correctness"
+        ] = calculate_auroc(
+            estimate, gt_zero_shot_correctnesses, args, soft=False
+        ).item()
 
         if is_same_task and not isinstance(model, MCInfoNCEWrapper):
             metrics[
@@ -588,21 +588,21 @@ def evaluate_on_correctness_prediction(
             ] = calculate_auroc(
                 estimate, gt_hard_fbar_correctnesses_original, args, soft=False
             ).item()
-            metrics[f"{key_prefix}{estimator_name}_auroc_hard_fbar_correctness"] = (
-                calculate_auroc(
-                    estimate, gt_hard_fbar_correctnesses, args, soft=False
-                ).item()
-            )
+            metrics[
+                f"{key_prefix}{estimator_name}_auroc_hard_fbar_correctness"
+            ] = calculate_auroc(
+                estimate, gt_hard_fbar_correctnesses, args, soft=False
+            ).item()
             metrics[
                 f"{key_prefix}{estimator_name}_auroc_hard_bma_correctness_original"
             ] = calculate_auroc(
                 estimate, gt_hard_bma_correctnesses_original, args, soft=False
             ).item()
-            metrics[f"{key_prefix}{estimator_name}_auroc_hard_bma_correctness"] = (
-                calculate_auroc(
-                    estimate, gt_hard_bma_correctnesses, args, soft=False
-                ).item()
-            )
+            metrics[
+                f"{key_prefix}{estimator_name}_auroc_hard_bma_correctness"
+            ] = calculate_auroc(
+                estimate, gt_hard_bma_correctnesses, args, soft=False
+            ).item()
 
             metrics[
                 f"{key_prefix}{estimator_name}_auroc_hard_fbar_correctness_original_top5"
@@ -619,23 +619,23 @@ def evaluate_on_correctness_prediction(
             ] = calculate_auroc(
                 estimate, gt_hard_bma_correctnesses_original_top5, args, soft=False
             ).item()
-            metrics[f"{key_prefix}{estimator_name}_auroc_hard_bma_correctness_top5"] = (
-                calculate_auroc(
-                    estimate, gt_hard_bma_correctnesses_top5, args, soft=False
-                ).item()
-            )
+            metrics[
+                f"{key_prefix}{estimator_name}_auroc_hard_bma_correctness_top5"
+            ] = calculate_auroc(
+                estimate, gt_hard_bma_correctnesses_top5, args, soft=False
+            ).item()
 
             if is_soft_labels:
-                metrics[f"{key_prefix}{estimator_name}_auroc_soft_fbar_correctness"] = (
-                    calculate_auroc(
-                        estimate, gt_soft_fbar_correctnesses, args, soft=True
-                    ).item()
-                )
-                metrics[f"{key_prefix}{estimator_name}_auroc_soft_bma_correctness"] = (
-                    calculate_auroc(
-                        estimate, gt_soft_bma_correctnesses, args, soft=True
-                    ).item()
-                )
+                metrics[
+                    f"{key_prefix}{estimator_name}_auroc_soft_fbar_correctness"
+                ] = calculate_auroc(
+                    estimate, gt_soft_fbar_correctnesses, args, soft=True
+                ).item()
+                metrics[
+                    f"{key_prefix}{estimator_name}_auroc_soft_bma_correctness"
+                ] = calculate_auroc(
+                    estimate, gt_soft_bma_correctnesses, args, soft=True
+                ).item()
 
                 metrics[
                     f"{key_prefix}{estimator_name}_auroc_soft_fbar_correctness_top5"
@@ -766,108 +766,108 @@ def evaluate_on_abstained_prediction(
     for estimator_name in estimates:
         estimate = estimates[estimator_name]
 
-        metrics[f"{key_prefix}{estimator_name}_zero_shot_aurc_original"] = (
-            area_under_risk_coverage_curve(
-                estimate, gt_zero_shot_correctnesses_original
-            ).item()
-        )
-        metrics[f"{key_prefix}{estimator_name}_zero_shot_aurc"] = (
-            area_under_risk_coverage_curve(estimate, gt_zero_shot_correctnesses).item()
-        )
+        metrics[
+            f"{key_prefix}{estimator_name}_zero_shot_aurc_original"
+        ] = area_under_risk_coverage_curve(
+            estimate, gt_zero_shot_correctnesses_original
+        ).item()
+        metrics[
+            f"{key_prefix}{estimator_name}_zero_shot_aurc"
+        ] = area_under_risk_coverage_curve(estimate, gt_zero_shot_correctnesses).item()
         metrics[
             f"{key_prefix}{estimator_name}_cumulative_zero_shot_abstinence_auc_original"
-        ] = 1 - metrics[f"{key_prefix}{estimator_name}_zero_shot_aurc_original"]
+        ] = (1 - metrics[f"{key_prefix}{estimator_name}_zero_shot_aurc_original"])
         metrics[f"{key_prefix}{estimator_name}_cumulative_zero_shot_abstinence_auc"] = (
             1 - metrics[f"{key_prefix}{estimator_name}_zero_shot_aurc"]
         )
-        metrics[f"{key_prefix}{estimator_name}_zero_shot_eaurc_original"] = (
-            excess_area_under_risk_coverage_curve(
-                estimate, gt_zero_shot_correctnesses_original
-            )
+        metrics[
+            f"{key_prefix}{estimator_name}_zero_shot_eaurc_original"
+        ] = excess_area_under_risk_coverage_curve(
+            estimate, gt_zero_shot_correctnesses_original
         )
-        metrics[f"{key_prefix}{estimator_name}_zero_shot_eaurc"] = (
-            excess_area_under_risk_coverage_curve(estimate, gt_zero_shot_correctnesses)
-        )
-        metrics[f"{key_prefix}{estimator_name}_zero_shot_aulc_original"] = (
-            area_under_lift_curve(estimate, gt_zero_shot_correctnesses_original).item()
-        )
+        metrics[
+            f"{key_prefix}{estimator_name}_zero_shot_eaurc"
+        ] = excess_area_under_risk_coverage_curve(estimate, gt_zero_shot_correctnesses)
+        metrics[
+            f"{key_prefix}{estimator_name}_zero_shot_aulc_original"
+        ] = area_under_lift_curve(estimate, gt_zero_shot_correctnesses_original).item()
         metrics[f"{key_prefix}{estimator_name}_zero_shot_aulc"] = area_under_lift_curve(
             estimate, gt_zero_shot_correctnesses
         ).item()
-        metrics[f"{key_prefix}{estimator_name}_zero_shot_raulc_original"] = (
-            relative_area_under_lift_curve(
-                estimate, gt_zero_shot_correctnesses_original
-            ).item()
-        )
-        metrics[f"{key_prefix}{estimator_name}_zero_shot_raulc"] = (
-            relative_area_under_lift_curve(estimate, gt_zero_shot_correctnesses).item()
-        )
+        metrics[
+            f"{key_prefix}{estimator_name}_zero_shot_raulc_original"
+        ] = relative_area_under_lift_curve(
+            estimate, gt_zero_shot_correctnesses_original
+        ).item()
+        metrics[
+            f"{key_prefix}{estimator_name}_zero_shot_raulc"
+        ] = relative_area_under_lift_curve(estimate, gt_zero_shot_correctnesses).item()
         metrics[
             f"{key_prefix}{estimator_name}_zero_shot_coverage_for_95_accuracy_original"
         ] = coverage_for_accuracy(
             estimate, gt_zero_shot_correctnesses_original, accuracy=0.95
         ).item()
-        metrics[f"{key_prefix}{estimator_name}_zero_shot_coverage_for_95_accuracy"] = (
-            coverage_for_accuracy(
-                estimate, gt_zero_shot_correctnesses, accuracy=0.95
-            ).item()
-        )
+        metrics[
+            f"{key_prefix}{estimator_name}_zero_shot_coverage_for_95_accuracy"
+        ] = coverage_for_accuracy(
+            estimate, gt_zero_shot_correctnesses, accuracy=0.95
+        ).item()
         metrics[
             f"{key_prefix}{estimator_name}_zero_shot_coverage_for_99_accuracy_original"
         ] = coverage_for_accuracy(
             estimate, gt_zero_shot_correctnesses_original, accuracy=0.99
         ).item()
-        metrics[f"{key_prefix}{estimator_name}_zero_shot_coverage_for_99_accuracy"] = (
-            coverage_for_accuracy(
-                estimate, gt_zero_shot_correctnesses, accuracy=0.99
-            ).item()
-        )
+        metrics[
+            f"{key_prefix}{estimator_name}_zero_shot_coverage_for_99_accuracy"
+        ] = coverage_for_accuracy(
+            estimate, gt_zero_shot_correctnesses, accuracy=0.99
+        ).item()
 
         if is_same_task and not isinstance(model, MCInfoNCEWrapper):
-            metrics[f"{key_prefix}{estimator_name}_hard_fbar_aurc_original"] = (
-                area_under_risk_coverage_curve(
-                    estimate, gt_hard_fbar_correctnesses_original
-                ).item()
-            )
-            metrics[f"{key_prefix}{estimator_name}_hard_fbar_aurc"] = (
-                area_under_risk_coverage_curve(
-                    estimate, gt_hard_fbar_correctnesses
-                ).item()
-            )
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_fbar_aurc_original"
+            ] = area_under_risk_coverage_curve(
+                estimate, gt_hard_fbar_correctnesses_original
+            ).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_fbar_aurc"
+            ] = area_under_risk_coverage_curve(
+                estimate, gt_hard_fbar_correctnesses
+            ).item()
             metrics[
                 f"{key_prefix}{estimator_name}_cumulative_hard_fbar_abstinence_auc_original"
-            ] = 1 - metrics[f"{key_prefix}{estimator_name}_hard_fbar_aurc_original"]
+            ] = (1 - metrics[f"{key_prefix}{estimator_name}_hard_fbar_aurc_original"])
             metrics[
                 f"{key_prefix}{estimator_name}_cumulative_hard_fbar_abstinence_auc"
-            ] = 1 - metrics[f"{key_prefix}{estimator_name}_hard_fbar_aurc"]
-            metrics[f"{key_prefix}{estimator_name}_hard_fbar_eaurc_original"] = (
-                excess_area_under_risk_coverage_curve(
-                    estimate, gt_hard_fbar_correctnesses_original
-                ).item()
-            )
-            metrics[f"{key_prefix}{estimator_name}_hard_fbar_eaurc"] = (
-                excess_area_under_risk_coverage_curve(
-                    estimate, gt_hard_fbar_correctnesses
-                ).item()
-            )
-            metrics[f"{key_prefix}{estimator_name}_hard_fbar_aulc_original"] = (
-                area_under_lift_curve(
-                    estimate, gt_hard_fbar_correctnesses_original
-                ).item()
-            )
-            metrics[f"{key_prefix}{estimator_name}_hard_fbar_aulc"] = (
-                area_under_lift_curve(estimate, gt_hard_fbar_correctnesses).item()
-            )
-            metrics[f"{key_prefix}{estimator_name}_hard_fbar_raulc_original"] = (
-                relative_area_under_lift_curve(
-                    estimate, gt_hard_fbar_correctnesses_original
-                ).item()
-            )
-            metrics[f"{key_prefix}{estimator_name}_hard_fbar_raulc"] = (
-                relative_area_under_lift_curve(
-                    estimate, gt_hard_fbar_correctnesses
-                ).item()
-            )
+            ] = (1 - metrics[f"{key_prefix}{estimator_name}_hard_fbar_aurc"])
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_fbar_eaurc_original"
+            ] = excess_area_under_risk_coverage_curve(
+                estimate, gt_hard_fbar_correctnesses_original
+            ).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_fbar_eaurc"
+            ] = excess_area_under_risk_coverage_curve(
+                estimate, gt_hard_fbar_correctnesses
+            ).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_fbar_aulc_original"
+            ] = area_under_lift_curve(
+                estimate, gt_hard_fbar_correctnesses_original
+            ).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_fbar_aulc"
+            ] = area_under_lift_curve(estimate, gt_hard_fbar_correctnesses).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_fbar_raulc_original"
+            ] = relative_area_under_lift_curve(
+                estimate, gt_hard_fbar_correctnesses_original
+            ).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_fbar_raulc"
+            ] = relative_area_under_lift_curve(
+                estimate, gt_hard_fbar_correctnesses
+            ).item()
             metrics[
                 f"{key_prefix}{estimator_name}_hard_fbar_coverage_for_95_accuracy_original"
             ] = coverage_for_accuracy(
@@ -889,50 +889,50 @@ def evaluate_on_abstained_prediction(
                 estimate, gt_hard_fbar_correctnesses, accuracy=0.99
             ).item()
 
-            metrics[f"{key_prefix}{estimator_name}_hard_bma_aurc_original"] = (
-                area_under_risk_coverage_curve(
-                    estimate, gt_hard_bma_correctnesses_original
-                ).item()
-            )
-            metrics[f"{key_prefix}{estimator_name}_hard_bma_aurc"] = (
-                area_under_risk_coverage_curve(
-                    estimate, gt_hard_bma_correctnesses
-                ).item()
-            )
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_bma_aurc_original"
+            ] = area_under_risk_coverage_curve(
+                estimate, gt_hard_bma_correctnesses_original
+            ).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_bma_aurc"
+            ] = area_under_risk_coverage_curve(
+                estimate, gt_hard_bma_correctnesses
+            ).item()
             metrics[
                 f"{key_prefix}{estimator_name}_cumulative_hard_bma_abstinence_auc_original"
-            ] = 1 - metrics[f"{key_prefix}{estimator_name}_hard_bma_aurc_original"]
+            ] = (1 - metrics[f"{key_prefix}{estimator_name}_hard_bma_aurc_original"])
             metrics[
                 f"{key_prefix}{estimator_name}_cumulative_hard_bma_abstinence_auc"
-            ] = 1 - metrics[f"{key_prefix}{estimator_name}_hard_bma_aurc"]
-            metrics[f"{key_prefix}{estimator_name}_hard_bma_eaurc_original"] = (
-                excess_area_under_risk_coverage_curve(
-                    estimate, gt_hard_bma_correctnesses_original
-                ).item()
-            )
-            metrics[f"{key_prefix}{estimator_name}_hard_bma_eaurc"] = (
-                excess_area_under_risk_coverage_curve(
-                    estimate, gt_hard_bma_correctnesses
-                ).item()
-            )
-            metrics[f"{key_prefix}{estimator_name}_hard_bma_aulc_original"] = (
-                area_under_lift_curve(
-                    estimate, gt_hard_bma_correctnesses_original
-                ).item()
-            )
-            metrics[f"{key_prefix}{estimator_name}_hard_bma_aulc"] = (
-                area_under_lift_curve(estimate, gt_hard_bma_correctnesses).item()
-            )
-            metrics[f"{key_prefix}{estimator_name}_hard_bma_raulc_original"] = (
-                relative_area_under_lift_curve(
-                    estimate, gt_hard_bma_correctnesses_original
-                ).item()
-            )
-            metrics[f"{key_prefix}{estimator_name}_hard_bma_raulc"] = (
-                relative_area_under_lift_curve(
-                    estimate, gt_hard_bma_correctnesses
-                ).item()
-            )
+            ] = (1 - metrics[f"{key_prefix}{estimator_name}_hard_bma_aurc"])
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_bma_eaurc_original"
+            ] = excess_area_under_risk_coverage_curve(
+                estimate, gt_hard_bma_correctnesses_original
+            ).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_bma_eaurc"
+            ] = excess_area_under_risk_coverage_curve(
+                estimate, gt_hard_bma_correctnesses
+            ).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_bma_aulc_original"
+            ] = area_under_lift_curve(
+                estimate, gt_hard_bma_correctnesses_original
+            ).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_bma_aulc"
+            ] = area_under_lift_curve(estimate, gt_hard_bma_correctnesses).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_bma_raulc_original"
+            ] = relative_area_under_lift_curve(
+                estimate, gt_hard_bma_correctnesses_original
+            ).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_bma_raulc"
+            ] = relative_area_under_lift_curve(
+                estimate, gt_hard_bma_correctnesses
+            ).item()
             metrics[
                 f"{key_prefix}{estimator_name}_hard_bma_coverage_for_95_accuracy_original"
             ] = coverage_for_accuracy(
@@ -954,16 +954,16 @@ def evaluate_on_abstained_prediction(
                 estimate, gt_hard_bma_correctnesses, accuracy=0.99
             ).item()
 
-            metrics[f"{key_prefix}{estimator_name}_hard_fbar_aurc_original_top5"] = (
-                area_under_risk_coverage_curve(
-                    estimate, gt_hard_fbar_correctnesses_original_top5
-                ).item()
-            )
-            metrics[f"{key_prefix}{estimator_name}_hard_fbar_aurc_top5"] = (
-                area_under_risk_coverage_curve(
-                    estimate, gt_hard_fbar_correctnesses_top5
-                ).item()
-            )
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_fbar_aurc_original_top5"
+            ] = area_under_risk_coverage_curve(
+                estimate, gt_hard_fbar_correctnesses_original_top5
+            ).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_fbar_aurc_top5"
+            ] = area_under_risk_coverage_curve(
+                estimate, gt_hard_fbar_correctnesses_top5
+            ).item()
             metrics[
                 f"{key_prefix}{estimator_name}_cumulative_hard_fbar_abstinence_auc_original_top5"
             ] = (
@@ -972,35 +972,35 @@ def evaluate_on_abstained_prediction(
             )
             metrics[
                 f"{key_prefix}{estimator_name}_cumulative_hard_fbar_abstinence_auc_top5"
-            ] = 1 - metrics[f"{key_prefix}{estimator_name}_hard_fbar_aurc_top5"]
-            metrics[f"{key_prefix}{estimator_name}_hard_fbar_eaurc_original_top5"] = (
-                excess_area_under_risk_coverage_curve(
-                    estimate, gt_hard_fbar_correctnesses_original_top5
-                ).item()
-            )
-            metrics[f"{key_prefix}{estimator_name}_hard_fbar_eaurc_top5"] = (
-                excess_area_under_risk_coverage_curve(
-                    estimate, gt_hard_fbar_correctnesses_top5
-                ).item()
-            )
-            metrics[f"{key_prefix}{estimator_name}_hard_fbar_aulc_original_top5"] = (
-                area_under_lift_curve(
-                    estimate, gt_hard_fbar_correctnesses_original_top5
-                ).item()
-            )
-            metrics[f"{key_prefix}{estimator_name}_hard_fbar_aulc_top5"] = (
-                area_under_lift_curve(estimate, gt_hard_fbar_correctnesses_top5).item()
-            )
-            metrics[f"{key_prefix}{estimator_name}_hard_fbar_raulc_original_top5"] = (
-                relative_area_under_lift_curve(
-                    estimate, gt_hard_fbar_correctnesses_original_top5
-                ).item()
-            )
-            metrics[f"{key_prefix}{estimator_name}_hard_fbar_raulc_top5"] = (
-                relative_area_under_lift_curve(
-                    estimate, gt_hard_fbar_correctnesses_top5
-                ).item()
-            )
+            ] = (1 - metrics[f"{key_prefix}{estimator_name}_hard_fbar_aurc_top5"])
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_fbar_eaurc_original_top5"
+            ] = excess_area_under_risk_coverage_curve(
+                estimate, gt_hard_fbar_correctnesses_original_top5
+            ).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_fbar_eaurc_top5"
+            ] = excess_area_under_risk_coverage_curve(
+                estimate, gt_hard_fbar_correctnesses_top5
+            ).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_fbar_aulc_original_top5"
+            ] = area_under_lift_curve(
+                estimate, gt_hard_fbar_correctnesses_original_top5
+            ).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_fbar_aulc_top5"
+            ] = area_under_lift_curve(estimate, gt_hard_fbar_correctnesses_top5).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_fbar_raulc_original_top5"
+            ] = relative_area_under_lift_curve(
+                estimate, gt_hard_fbar_correctnesses_original_top5
+            ).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_fbar_raulc_top5"
+            ] = relative_area_under_lift_curve(
+                estimate, gt_hard_fbar_correctnesses_top5
+            ).item()
             metrics[
                 f"{key_prefix}{estimator_name}_hard_fbar_coverage_for_95_accuracy_original_top5"
             ] = coverage_for_accuracy(
@@ -1022,50 +1022,52 @@ def evaluate_on_abstained_prediction(
                 estimate, gt_hard_fbar_correctnesses_top5, accuracy=0.99
             ).item()
 
-            metrics[f"{key_prefix}{estimator_name}_hard_bma_aurc_original_top5"] = (
-                area_under_risk_coverage_curve(
-                    estimate, gt_hard_bma_correctnesses_original_top5
-                ).item()
-            )
-            metrics[f"{key_prefix}{estimator_name}_hard_bma_aurc_top5"] = (
-                area_under_risk_coverage_curve(
-                    estimate, gt_hard_bma_correctnesses_top5
-                ).item()
-            )
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_bma_aurc_original_top5"
+            ] = area_under_risk_coverage_curve(
+                estimate, gt_hard_bma_correctnesses_original_top5
+            ).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_bma_aurc_top5"
+            ] = area_under_risk_coverage_curve(
+                estimate, gt_hard_bma_correctnesses_top5
+            ).item()
             metrics[
                 f"{key_prefix}{estimator_name}_cumulative_hard_bma_abstinence_auc_original_top5"
-            ] = 1 - metrics[f"{key_prefix}{estimator_name}_hard_bma_aurc_original_top5"]
+            ] = (
+                1 - metrics[f"{key_prefix}{estimator_name}_hard_bma_aurc_original_top5"]
+            )
             metrics[
                 f"{key_prefix}{estimator_name}_cumulative_hard_bma_abstinence_auc_top5"
-            ] = 1 - metrics[f"{key_prefix}{estimator_name}_hard_bma_aurc_top5"]
-            metrics[f"{key_prefix}{estimator_name}_hard_bma_eaurc_original_top5"] = (
-                excess_area_under_risk_coverage_curve(
-                    estimate, gt_hard_bma_correctnesses_original_top5
-                ).item()
-            )
-            metrics[f"{key_prefix}{estimator_name}_hard_bma_eaurc_top5"] = (
-                excess_area_under_risk_coverage_curve(
-                    estimate, gt_hard_bma_correctnesses_top5
-                ).item()
-            )
-            metrics[f"{key_prefix}{estimator_name}_hard_bma_aulc_original_top5"] = (
-                area_under_lift_curve(
-                    estimate, gt_hard_bma_correctnesses_original_top5
-                ).item()
-            )
-            metrics[f"{key_prefix}{estimator_name}_hard_bma_aulc_top5"] = (
-                area_under_lift_curve(estimate, gt_hard_bma_correctnesses_top5).item()
-            )
-            metrics[f"{key_prefix}{estimator_name}_hard_bma_raulc_original_top5"] = (
-                relative_area_under_lift_curve(
-                    estimate, gt_hard_bma_correctnesses_original_top5
-                ).item()
-            )
-            metrics[f"{key_prefix}{estimator_name}_hard_bma_raulc_top5"] = (
-                relative_area_under_lift_curve(
-                    estimate, gt_hard_bma_correctnesses_top5
-                ).item()
-            )
+            ] = (1 - metrics[f"{key_prefix}{estimator_name}_hard_bma_aurc_top5"])
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_bma_eaurc_original_top5"
+            ] = excess_area_under_risk_coverage_curve(
+                estimate, gt_hard_bma_correctnesses_original_top5
+            ).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_bma_eaurc_top5"
+            ] = excess_area_under_risk_coverage_curve(
+                estimate, gt_hard_bma_correctnesses_top5
+            ).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_bma_aulc_original_top5"
+            ] = area_under_lift_curve(
+                estimate, gt_hard_bma_correctnesses_original_top5
+            ).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_bma_aulc_top5"
+            ] = area_under_lift_curve(estimate, gt_hard_bma_correctnesses_top5).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_bma_raulc_original_top5"
+            ] = relative_area_under_lift_curve(
+                estimate, gt_hard_bma_correctnesses_original_top5
+            ).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_hard_bma_raulc_top5"
+            ] = relative_area_under_lift_curve(
+                estimate, gt_hard_bma_correctnesses_top5
+            ).item()
             metrics[
                 f"{key_prefix}{estimator_name}_hard_bma_coverage_for_95_accuracy_original_top5"
             ] = coverage_for_accuracy(
@@ -1088,27 +1090,27 @@ def evaluate_on_abstained_prediction(
             ).item()
 
             if is_soft_labels:
-                metrics[f"{key_prefix}{estimator_name}_soft_fbar_aurc"] = (
-                    area_under_risk_coverage_curve(
-                        estimate, gt_soft_fbar_correctnesses
-                    ).item()
-                )
+                metrics[
+                    f"{key_prefix}{estimator_name}_soft_fbar_aurc"
+                ] = area_under_risk_coverage_curve(
+                    estimate, gt_soft_fbar_correctnesses
+                ).item()
                 metrics[
                     f"{key_prefix}{estimator_name}_cumulative_soft_fbar_abstinence_auc"
-                ] = 1 - metrics[f"{key_prefix}{estimator_name}_soft_fbar_aurc"]
-                metrics[f"{key_prefix}{estimator_name}_soft_fbar_eaurc"] = (
-                    excess_area_under_risk_coverage_curve(
-                        estimate, gt_soft_fbar_correctnesses
-                    ).item()
-                )
-                metrics[f"{key_prefix}{estimator_name}_soft_fbar_aulc"] = (
-                    area_under_lift_curve(estimate, gt_soft_fbar_correctnesses).item()
-                )
-                metrics[f"{key_prefix}{estimator_name}_soft_fbar_raulc"] = (
-                    relative_area_under_lift_curve(
-                        estimate, gt_soft_fbar_correctnesses
-                    ).item()
-                )
+                ] = (1 - metrics[f"{key_prefix}{estimator_name}_soft_fbar_aurc"])
+                metrics[
+                    f"{key_prefix}{estimator_name}_soft_fbar_eaurc"
+                ] = excess_area_under_risk_coverage_curve(
+                    estimate, gt_soft_fbar_correctnesses
+                ).item()
+                metrics[
+                    f"{key_prefix}{estimator_name}_soft_fbar_aulc"
+                ] = area_under_lift_curve(estimate, gt_soft_fbar_correctnesses).item()
+                metrics[
+                    f"{key_prefix}{estimator_name}_soft_fbar_raulc"
+                ] = relative_area_under_lift_curve(
+                    estimate, gt_soft_fbar_correctnesses
+                ).item()
                 metrics[
                     f"{key_prefix}{estimator_name}_soft_fbar_coverage_for_95_accuracy"
                 ] = coverage_for_accuracy(
@@ -1120,27 +1122,27 @@ def evaluate_on_abstained_prediction(
                     estimate, gt_soft_fbar_correctnesses, accuracy=0.99
                 ).item()
 
-                metrics[f"{key_prefix}{estimator_name}_soft_bma_aurc"] = (
-                    area_under_risk_coverage_curve(
-                        estimate, gt_soft_bma_correctnesses
-                    ).item()
-                )
+                metrics[
+                    f"{key_prefix}{estimator_name}_soft_bma_aurc"
+                ] = area_under_risk_coverage_curve(
+                    estimate, gt_soft_bma_correctnesses
+                ).item()
                 metrics[
                     f"{key_prefix}{estimator_name}_cumulative_soft_bma_abstinence_auc"
-                ] = 1 - metrics[f"{key_prefix}{estimator_name}_soft_bma_aurc"]
-                metrics[f"{key_prefix}{estimator_name}_soft_bma_eaurc"] = (
-                    excess_area_under_risk_coverage_curve(
-                        estimate, gt_soft_bma_correctnesses
-                    ).item()
-                )
-                metrics[f"{key_prefix}{estimator_name}_soft_bma_aulc"] = (
-                    area_under_lift_curve(estimate, gt_soft_bma_correctnesses).item()
-                )
-                metrics[f"{key_prefix}{estimator_name}_soft_bma_raulc"] = (
-                    relative_area_under_lift_curve(
-                        estimate, gt_soft_bma_correctnesses
-                    ).item()
-                )
+                ] = (1 - metrics[f"{key_prefix}{estimator_name}_soft_bma_aurc"])
+                metrics[
+                    f"{key_prefix}{estimator_name}_soft_bma_eaurc"
+                ] = excess_area_under_risk_coverage_curve(
+                    estimate, gt_soft_bma_correctnesses
+                ).item()
+                metrics[
+                    f"{key_prefix}{estimator_name}_soft_bma_aulc"
+                ] = area_under_lift_curve(estimate, gt_soft_bma_correctnesses).item()
+                metrics[
+                    f"{key_prefix}{estimator_name}_soft_bma_raulc"
+                ] = relative_area_under_lift_curve(
+                    estimate, gt_soft_bma_correctnesses
+                ).item()
                 metrics[
                     f"{key_prefix}{estimator_name}_soft_bma_coverage_for_95_accuracy"
                 ] = coverage_for_accuracy(
@@ -1152,29 +1154,29 @@ def evaluate_on_abstained_prediction(
                     estimate, gt_soft_bma_correctnesses, accuracy=0.99
                 ).item()
 
-                metrics[f"{key_prefix}{estimator_name}_soft_fbar_aurc_top5"] = (
-                    area_under_risk_coverage_curve(
-                        estimate, gt_soft_fbar_correctnesses_top5
-                    ).item()
-                )
+                metrics[
+                    f"{key_prefix}{estimator_name}_soft_fbar_aurc_top5"
+                ] = area_under_risk_coverage_curve(
+                    estimate, gt_soft_fbar_correctnesses_top5
+                ).item()
                 metrics[
                     f"{key_prefix}{estimator_name}_cumulative_soft_fbar_abstinence_auc_top5"
-                ] = 1 - metrics[f"{key_prefix}{estimator_name}_soft_fbar_aurc_top5"]
-                metrics[f"{key_prefix}{estimator_name}_soft_fbar_eaurc_top5"] = (
-                    excess_area_under_risk_coverage_curve(
-                        estimate, gt_soft_fbar_correctnesses_top5
-                    ).item()
-                )
-                metrics[f"{key_prefix}{estimator_name}_soft_fbar_aulc_top5"] = (
-                    area_under_lift_curve(
-                        estimate, gt_soft_fbar_correctnesses_top5
-                    ).item()
-                )
-                metrics[f"{key_prefix}{estimator_name}_soft_fbar_raulc_top5"] = (
-                    relative_area_under_lift_curve(
-                        estimate, gt_soft_fbar_correctnesses_top5
-                    ).item()
-                )
+                ] = (1 - metrics[f"{key_prefix}{estimator_name}_soft_fbar_aurc_top5"])
+                metrics[
+                    f"{key_prefix}{estimator_name}_soft_fbar_eaurc_top5"
+                ] = excess_area_under_risk_coverage_curve(
+                    estimate, gt_soft_fbar_correctnesses_top5
+                ).item()
+                metrics[
+                    f"{key_prefix}{estimator_name}_soft_fbar_aulc_top5"
+                ] = area_under_lift_curve(
+                    estimate, gt_soft_fbar_correctnesses_top5
+                ).item()
+                metrics[
+                    f"{key_prefix}{estimator_name}_soft_fbar_raulc_top5"
+                ] = relative_area_under_lift_curve(
+                    estimate, gt_soft_fbar_correctnesses_top5
+                ).item()
                 metrics[
                     f"{key_prefix}{estimator_name}_soft_fbar_coverage_for_95_accuracy_top5"
                 ] = coverage_for_accuracy(
@@ -1186,29 +1188,29 @@ def evaluate_on_abstained_prediction(
                     estimate, gt_soft_fbar_correctnesses_top5, accuracy=0.99
                 ).item()
 
-                metrics[f"{key_prefix}{estimator_name}_soft_bma_aurc_top5"] = (
-                    area_under_risk_coverage_curve(
-                        estimate, gt_soft_bma_correctnesses_top5
-                    ).item()
-                )
+                metrics[
+                    f"{key_prefix}{estimator_name}_soft_bma_aurc_top5"
+                ] = area_under_risk_coverage_curve(
+                    estimate, gt_soft_bma_correctnesses_top5
+                ).item()
                 metrics[
                     f"{key_prefix}{estimator_name}_cumulative_soft_bma_abstinence_auc_top5"
-                ] = 1 - metrics[f"{key_prefix}{estimator_name}_soft_bma_aurc_top5"]
-                metrics[f"{key_prefix}{estimator_name}_soft_bma_eaurc_top5"] = (
-                    excess_area_under_risk_coverage_curve(
-                        estimate, gt_soft_bma_correctnesses_top5
-                    ).item()
-                )
-                metrics[f"{key_prefix}{estimator_name}_soft_bma_aulc_top5"] = (
-                    area_under_lift_curve(
-                        estimate, gt_soft_bma_correctnesses_top5
-                    ).item()
-                )
-                metrics[f"{key_prefix}{estimator_name}_soft_bma_raulc_top5"] = (
-                    relative_area_under_lift_curve(
-                        estimate, gt_soft_bma_correctnesses_top5
-                    ).item()
-                )
+                ] = (1 - metrics[f"{key_prefix}{estimator_name}_soft_bma_aurc_top5"])
+                metrics[
+                    f"{key_prefix}{estimator_name}_soft_bma_eaurc_top5"
+                ] = excess_area_under_risk_coverage_curve(
+                    estimate, gt_soft_bma_correctnesses_top5
+                ).item()
+                metrics[
+                    f"{key_prefix}{estimator_name}_soft_bma_aulc_top5"
+                ] = area_under_lift_curve(
+                    estimate, gt_soft_bma_correctnesses_top5
+                ).item()
+                metrics[
+                    f"{key_prefix}{estimator_name}_soft_bma_raulc_top5"
+                ] = relative_area_under_lift_curve(
+                    estimate, gt_soft_bma_correctnesses_top5
+                ).item()
                 metrics[
                     f"{key_prefix}{estimator_name}_soft_bma_coverage_for_95_accuracy_top5"
                 ] = coverage_for_accuracy(
@@ -1226,11 +1228,11 @@ def evaluate_on_abstained_prediction(
 def evaluate_on_ood_detection(estimates, targets, args):
     metrics = {}
     for estimator_name in estimates:
-        metrics[f"mixed_{args.dataset_id}_{estimator_name}_auroc_oodness"] = (
-            calculate_auroc(
-                estimates[estimator_name], targets["gt_oodness"], args, soft=False
-            ).item()
-        )
+        metrics[
+            f"mixed_{args.dataset_id}_{estimator_name}_auroc_oodness"
+        ] = calculate_auroc(
+            estimates[estimator_name], targets["gt_oodness"], args, soft=False
+        ).item()
 
     return metrics
 
@@ -1315,45 +1317,45 @@ def evaluate_on_proper_scoring_and_calibration(
         metrics[
             f"{key_prefix}{estimator_name}_brier_score_zero_shot_correctness_original"
         ] = binary_brier(estimate, gt_zero_shot_correctnesses_original).item()
-        metrics[f"{key_prefix}{estimator_name}_brier_score_zero_shot_correctness"] = (
-            binary_brier(estimate, gt_zero_shot_correctnesses).item()
-        )
+        metrics[
+            f"{key_prefix}{estimator_name}_brier_score_zero_shot_correctness"
+        ] = binary_brier(estimate, gt_zero_shot_correctnesses).item()
 
         # Binary ECE
-        metrics[f"{key_prefix}{estimator_name}_ece_zero_shot_correctness_original"] = (
-            calibration_error(
-                confidences=estimate,
-                correctnesses=gt_zero_shot_correctnesses_original,
-                num_bins=15,
-                norm="l1",
-            ).item()
-        )
-        metrics[f"{key_prefix}{estimator_name}_ece_zero_shot_correctness"] = (
-            calibration_error(
-                confidences=estimate,
-                correctnesses=gt_zero_shot_correctnesses,
-                num_bins=15,
-                norm="l1",
-            ).item()
-        )
+        metrics[
+            f"{key_prefix}{estimator_name}_ece_zero_shot_correctness_original"
+        ] = calibration_error(
+            confidences=estimate,
+            correctnesses=gt_zero_shot_correctnesses_original,
+            num_bins=15,
+            norm="l1",
+        ).item()
+        metrics[
+            f"{key_prefix}{estimator_name}_ece_zero_shot_correctness"
+        ] = calibration_error(
+            confidences=estimate,
+            correctnesses=gt_zero_shot_correctnesses,
+            num_bins=15,
+            norm="l1",
+        ).item()
 
         # Binary MCE
-        metrics[f"{key_prefix}{estimator_name}_mce_zero_shot_correctness_original"] = (
-            calibration_error(
-                confidences=estimate,
-                correctnesses=gt_zero_shot_correctnesses_original,
-                num_bins=15,
-                norm="inf",
-            ).item()
-        )
-        metrics[f"{key_prefix}{estimator_name}_mce_zero_shot_correctness"] = (
-            calibration_error(
-                confidences=estimate,
-                correctnesses=gt_zero_shot_correctnesses,
-                num_bins=15,
-                norm="inf",
-            ).item()
-        )
+        metrics[
+            f"{key_prefix}{estimator_name}_mce_zero_shot_correctness_original"
+        ] = calibration_error(
+            confidences=estimate,
+            correctnesses=gt_zero_shot_correctnesses_original,
+            num_bins=15,
+            norm="inf",
+        ).item()
+        metrics[
+            f"{key_prefix}{estimator_name}_mce_zero_shot_correctness"
+        ] = calibration_error(
+            confidences=estimate,
+            correctnesses=gt_zero_shot_correctnesses,
+            num_bins=15,
+            norm="inf",
+        ).item()
 
         # {Hard, Soft}-label correctness
         if is_same_task:
@@ -1379,14 +1381,14 @@ def evaluate_on_proper_scoring_and_calibration(
                 num_bins=15,
                 norm="l1",
             ).item()
-            metrics[f"{key_prefix}{estimator_name}_ece_hard_fbar_correctness"] = (
-                calibration_error(
-                    confidences=estimate,
-                    correctnesses=gt_hard_fbar_correctnesses,
-                    num_bins=15,
-                    norm="l1",
-                ).item()
-            )
+            metrics[
+                f"{key_prefix}{estimator_name}_ece_hard_fbar_correctness"
+            ] = calibration_error(
+                confidences=estimate,
+                correctnesses=gt_hard_fbar_correctnesses,
+                num_bins=15,
+                norm="l1",
+            ).item()
             metrics[
                 f"{key_prefix}{estimator_name}_mce_hard_fbar_correctness_original"
             ] = calibration_error(
@@ -1395,14 +1397,14 @@ def evaluate_on_proper_scoring_and_calibration(
                 num_bins=15,
                 norm="inf",
             ).item()
-            metrics[f"{key_prefix}{estimator_name}_mce_hard_fbar_correctness"] = (
-                calibration_error(
-                    confidences=estimate,
-                    correctnesses=gt_hard_fbar_correctnesses,
-                    num_bins=15,
-                    norm="inf",
-                ).item()
-            )
+            metrics[
+                f"{key_prefix}{estimator_name}_mce_hard_fbar_correctness"
+            ] = calibration_error(
+                confidences=estimate,
+                correctnesses=gt_hard_fbar_correctnesses,
+                num_bins=15,
+                norm="inf",
+            ).item()
 
             metrics[
                 f"{key_prefix}{estimator_name}_log_prob_score_hard_bma_correctness_original"
@@ -1426,14 +1428,14 @@ def evaluate_on_proper_scoring_and_calibration(
                 num_bins=15,
                 norm="l1",
             ).item()
-            metrics[f"{key_prefix}{estimator_name}_ece_hard_bma_correctness"] = (
-                calibration_error(
-                    confidences=estimate,
-                    correctnesses=gt_hard_bma_correctnesses,
-                    num_bins=15,
-                    norm="l1",
-                ).item()
-            )
+            metrics[
+                f"{key_prefix}{estimator_name}_ece_hard_bma_correctness"
+            ] = calibration_error(
+                confidences=estimate,
+                correctnesses=gt_hard_bma_correctnesses,
+                num_bins=15,
+                norm="l1",
+            ).item()
             metrics[
                 f"{key_prefix}{estimator_name}_mce_hard_bma_correctness_original"
             ] = calibration_error(
@@ -1442,14 +1444,14 @@ def evaluate_on_proper_scoring_and_calibration(
                 num_bins=15,
                 norm="inf",
             ).item()
-            metrics[f"{key_prefix}{estimator_name}_mce_hard_bma_correctness"] = (
-                calibration_error(
-                    confidences=estimate,
-                    correctnesses=gt_hard_bma_correctnesses,
-                    num_bins=15,
-                    norm="inf",
-                ).item()
-            )
+            metrics[
+                f"{key_prefix}{estimator_name}_mce_hard_bma_correctness"
+            ] = calibration_error(
+                confidences=estimate,
+                correctnesses=gt_hard_bma_correctnesses,
+                num_bins=15,
+                norm="inf",
+            ).item()
 
             metrics[
                 f"{key_prefix}{estimator_name}_log_prob_score_hard_fbar_correctness_original_top5"
@@ -1473,14 +1475,14 @@ def evaluate_on_proper_scoring_and_calibration(
                 num_bins=15,
                 norm="l1",
             ).item()
-            metrics[f"{key_prefix}{estimator_name}_ece_hard_fbar_correctness_top5"] = (
-                calibration_error(
-                    confidences=estimate,
-                    correctnesses=gt_hard_fbar_correctnesses_top5,
-                    num_bins=15,
-                    norm="l1",
-                ).item()
-            )
+            metrics[
+                f"{key_prefix}{estimator_name}_ece_hard_fbar_correctness_top5"
+            ] = calibration_error(
+                confidences=estimate,
+                correctnesses=gt_hard_fbar_correctnesses_top5,
+                num_bins=15,
+                norm="l1",
+            ).item()
             metrics[
                 f"{key_prefix}{estimator_name}_mce_hard_fbar_correctness_original_top5"
             ] = calibration_error(
@@ -1489,14 +1491,14 @@ def evaluate_on_proper_scoring_and_calibration(
                 num_bins=15,
                 norm="inf",
             ).item()
-            metrics[f"{key_prefix}{estimator_name}_mce_hard_fbar_correctness_top5"] = (
-                calibration_error(
-                    confidences=estimate,
-                    correctnesses=gt_hard_fbar_correctnesses_top5,
-                    num_bins=15,
-                    norm="inf",
-                ).item()
-            )
+            metrics[
+                f"{key_prefix}{estimator_name}_mce_hard_fbar_correctness_top5"
+            ] = calibration_error(
+                confidences=estimate,
+                correctnesses=gt_hard_fbar_correctnesses_top5,
+                num_bins=15,
+                norm="inf",
+            ).item()
 
             metrics[
                 f"{key_prefix}{estimator_name}_log_prob_score_hard_bma_correctness_original_top5"
@@ -1520,14 +1522,14 @@ def evaluate_on_proper_scoring_and_calibration(
                 num_bins=15,
                 norm="l1",
             ).item()
-            metrics[f"{key_prefix}{estimator_name}_ece_hard_bma_correctness_top5"] = (
-                calibration_error(
-                    confidences=estimate,
-                    correctnesses=gt_hard_bma_correctnesses_top5,
-                    num_bins=15,
-                    norm="l1",
-                ).item()
-            )
+            metrics[
+                f"{key_prefix}{estimator_name}_ece_hard_bma_correctness_top5"
+            ] = calibration_error(
+                confidences=estimate,
+                correctnesses=gt_hard_bma_correctnesses_top5,
+                num_bins=15,
+                norm="l1",
+            ).item()
             metrics[
                 f"{key_prefix}{estimator_name}_mce_hard_bma_correctness_original_top5"
             ] = calibration_error(
@@ -1536,14 +1538,14 @@ def evaluate_on_proper_scoring_and_calibration(
                 num_bins=15,
                 norm="inf",
             ).item()
-            metrics[f"{key_prefix}{estimator_name}_mce_hard_bma_correctness_top5"] = (
-                calibration_error(
-                    confidences=estimate,
-                    correctnesses=gt_hard_bma_correctnesses_top5,
-                    num_bins=15,
-                    norm="inf",
-                ).item()
-            )
+            metrics[
+                f"{key_prefix}{estimator_name}_mce_hard_bma_correctness_top5"
+            ] = calibration_error(
+                confidences=estimate,
+                correctnesses=gt_hard_bma_correctnesses_top5,
+                num_bins=15,
+                norm="inf",
+            ).item()
 
             if is_soft_labels:
                 metrics[
@@ -1552,22 +1554,22 @@ def evaluate_on_proper_scoring_and_calibration(
                 metrics[
                     f"{key_prefix}{estimator_name}_brier_score_soft_fbar_correctness"
                 ] = binary_brier(estimate, gt_soft_fbar_correctnesses).item()
-                metrics[f"{key_prefix}{estimator_name}_ece_soft_fbar_correctness"] = (
-                    calibration_error(
-                        confidences=estimate,
-                        correctnesses=gt_soft_fbar_correctnesses,
-                        num_bins=15,
-                        norm="l1",
-                    ).item()
-                )
-                metrics[f"{key_prefix}{estimator_name}_mce_soft_fbar_correctness"] = (
-                    calibration_error(
-                        confidences=estimate,
-                        correctnesses=gt_soft_fbar_correctnesses,
-                        num_bins=15,
-                        norm="inf",
-                    ).item()
-                )
+                metrics[
+                    f"{key_prefix}{estimator_name}_ece_soft_fbar_correctness"
+                ] = calibration_error(
+                    confidences=estimate,
+                    correctnesses=gt_soft_fbar_correctnesses,
+                    num_bins=15,
+                    norm="l1",
+                ).item()
+                metrics[
+                    f"{key_prefix}{estimator_name}_mce_soft_fbar_correctness"
+                ] = calibration_error(
+                    confidences=estimate,
+                    correctnesses=gt_soft_fbar_correctnesses,
+                    num_bins=15,
+                    norm="inf",
+                ).item()
 
                 metrics[
                     f"{key_prefix}{estimator_name}_log_prob_score_soft_bma_correctness"
@@ -1575,22 +1577,22 @@ def evaluate_on_proper_scoring_and_calibration(
                 metrics[
                     f"{key_prefix}{estimator_name}_brier_score_soft_bma_correctness"
                 ] = binary_brier(estimate, gt_soft_bma_correctnesses).item()
-                metrics[f"{key_prefix}{estimator_name}_ece_soft_bma_correctness"] = (
-                    calibration_error(
-                        confidences=estimate,
-                        correctnesses=gt_soft_bma_correctnesses,
-                        num_bins=15,
-                        norm="l1",
-                    ).item()
-                )
-                metrics[f"{key_prefix}{estimator_name}_mce_soft_bma_correctness"] = (
-                    calibration_error(
-                        confidences=estimate,
-                        correctnesses=gt_soft_bma_correctnesses,
-                        num_bins=15,
-                        norm="inf",
-                    ).item()
-                )
+                metrics[
+                    f"{key_prefix}{estimator_name}_ece_soft_bma_correctness"
+                ] = calibration_error(
+                    confidences=estimate,
+                    correctnesses=gt_soft_bma_correctnesses,
+                    num_bins=15,
+                    norm="l1",
+                ).item()
+                metrics[
+                    f"{key_prefix}{estimator_name}_mce_soft_bma_correctness"
+                ] = calibration_error(
+                    confidences=estimate,
+                    correctnesses=gt_soft_bma_correctnesses,
+                    num_bins=15,
+                    norm="inf",
+                ).item()
 
                 metrics[
                     f"{key_prefix}{estimator_name}_log_prob_score_soft_fbar_correctness_top5"
@@ -1647,36 +1649,36 @@ def evaluate_on_proper_scoring_and_calibration(
         gt_hard_labels_original = targets["gt_hard_labels_original"]
         gt_hard_labels = targets["gt_hard_labels"]
 
-        metrics[f"{key_prefix}log_prob_score_hard_fbar_aleatoric_original"] = (
-            multiclass_log_probability(
-                log_probs["log_fbars"], gt_hard_labels_original
-            ).item()
-        )
-        metrics[f"{key_prefix}log_prob_score_hard_fbar_aleatoric"] = (
-            multiclass_log_probability(log_probs["log_fbars"], gt_hard_labels).item()
-        )
-        metrics[f"{key_prefix}brier_score_hard_fbar_aleatoric_original"] = (
-            multiclass_brier(
-                log_probs["log_fbars"], gt_hard_labels_original, is_soft_targets=False
-            ).item()
-        )
+        metrics[
+            f"{key_prefix}log_prob_score_hard_fbar_aleatoric_original"
+        ] = multiclass_log_probability(
+            log_probs["log_fbars"], gt_hard_labels_original
+        ).item()
+        metrics[
+            f"{key_prefix}log_prob_score_hard_fbar_aleatoric"
+        ] = multiclass_log_probability(log_probs["log_fbars"], gt_hard_labels).item()
+        metrics[
+            f"{key_prefix}brier_score_hard_fbar_aleatoric_original"
+        ] = multiclass_brier(
+            log_probs["log_fbars"], gt_hard_labels_original, is_soft_targets=False
+        ).item()
         metrics[f"{key_prefix}brier_score_hard_fbar_aleatoric"] = multiclass_brier(
             log_probs["log_fbars"], gt_hard_labels, is_soft_targets=False
         ).item()
 
-        metrics[f"{key_prefix}log_prob_score_hard_bma_aleatoric_original"] = (
-            multiclass_log_probability(
-                log_probs["log_bmas"], gt_hard_labels_original
-            ).item()
-        )
-        metrics[f"{key_prefix}log_prob_score_hard_bma_aleatoric"] = (
-            multiclass_log_probability(log_probs["log_bmas"], gt_hard_labels).item()
-        )
-        metrics[f"{key_prefix}brier_score_hard_bma_aleatoric_original"] = (
-            multiclass_brier(
-                log_probs["log_bmas"], gt_hard_labels_original, is_soft_targets=False
-            ).item()
-        )
+        metrics[
+            f"{key_prefix}log_prob_score_hard_bma_aleatoric_original"
+        ] = multiclass_log_probability(
+            log_probs["log_bmas"], gt_hard_labels_original
+        ).item()
+        metrics[
+            f"{key_prefix}log_prob_score_hard_bma_aleatoric"
+        ] = multiclass_log_probability(log_probs["log_bmas"], gt_hard_labels).item()
+        metrics[
+            f"{key_prefix}brier_score_hard_bma_aleatoric_original"
+        ] = multiclass_brier(
+            log_probs["log_bmas"], gt_hard_labels_original, is_soft_targets=False
+        ).item()
         metrics[f"{key_prefix}brier_score_hard_bma_aleatoric"] = multiclass_brier(
             log_probs["log_bmas"], gt_hard_labels, is_soft_targets=False
         ).item()
@@ -1684,18 +1686,18 @@ def evaluate_on_proper_scoring_and_calibration(
         if is_soft_labels:
             gt_soft_labels = targets["gt_soft_labels"]
 
-            metrics[f"{key_prefix}log_prob_score_soft_fbar_aleatoric"] = (
-                multiclass_log_probability(
-                    log_probs["log_fbars"], gt_soft_labels
-                ).item()
-            )
+            metrics[
+                f"{key_prefix}log_prob_score_soft_fbar_aleatoric"
+            ] = multiclass_log_probability(
+                log_probs["log_fbars"], gt_soft_labels
+            ).item()
             metrics[f"{key_prefix}brier_score_soft_fbar_aleatoric"] = multiclass_brier(
                 log_probs["log_fbars"], gt_soft_labels, is_soft_targets=True
             ).item()
 
-            metrics[f"{key_prefix}log_prob_score_soft_bma_aleatoric"] = (
-                multiclass_log_probability(log_probs["log_bmas"], gt_soft_labels).item()
-            )
+            metrics[
+                f"{key_prefix}log_prob_score_soft_bma_aleatoric"
+            ] = multiclass_log_probability(log_probs["log_bmas"], gt_soft_labels).item()
             metrics[f"{key_prefix}brier_score_soft_bma_aleatoric"] = multiclass_brier(
                 log_probs["log_bmas"], gt_soft_labels, is_soft_targets=True
             ).item()
@@ -1744,9 +1746,9 @@ def evaluate_on_bregman(
         estimate = estimates[estimator_name]
 
         if not isinstance(model, MCInfoNCEWrapper):
-            metrics[f"{key_prefix}{estimator_name}_rank_correlation_bregman_eu"] = (
-                float(spearmanr(estimate, gt_epistemics_bregman)[0])
-            )
+            metrics[
+                f"{key_prefix}{estimator_name}_rank_correlation_bregman_eu"
+            ] = float(spearmanr(estimate, gt_epistemics_bregman)[0])
             metrics[f"{key_prefix}{estimator_name}_mse_bregman_eu"] = (
                 (estimate - gt_epistemics_bregman).square().mean().item()
             )
@@ -1755,9 +1757,9 @@ def evaluate_on_bregman(
             )
 
         if is_soft_labels:
-            metrics[f"{key_prefix}{estimator_name}_rank_correlation_bregman_au"] = (
-                float(spearmanr(estimate, gt_aleatorics_bregman)[0])
-            )
+            metrics[
+                f"{key_prefix}{estimator_name}_rank_correlation_bregman_au"
+            ] = float(spearmanr(estimate, gt_aleatorics_bregman)[0])
             metrics[f"{key_prefix}{estimator_name}_mse_bregman_au"] = (
                 (estimate - gt_aleatorics_bregman).square().mean().item()
             )
@@ -1765,9 +1767,9 @@ def evaluate_on_bregman(
                 (estimate - gt_aleatorics_bregman).abs().mean().item()
             )
 
-            metrics[f"{key_prefix}{estimator_name}_auroc_multiple_labels"] = (
-                calculate_auroc(estimate, multi_label_indices, args, soft=False).item()
-            )
+            metrics[
+                f"{key_prefix}{estimator_name}_auroc_multiple_labels"
+            ] = calculate_auroc(estimate, multi_label_indices, args, soft=False).item()
 
         if is_same_task and not isinstance(model, MCInfoNCEWrapper):
             metrics[
@@ -1790,9 +1792,9 @@ def evaluate_on_bregman(
                 (estimate - gt_total_predictives_bregman_fbar).abs().mean().item()
             )
 
-            metrics[f"{key_prefix}{estimator_name}_rank_correlation_bregman_pu_bma"] = (
-                float(spearmanr(estimate, gt_predictives_bregman_bma)[0])
-            )
+            metrics[
+                f"{key_prefix}{estimator_name}_rank_correlation_bregman_pu_bma"
+            ] = float(spearmanr(estimate, gt_predictives_bregman_bma)[0])
             metrics[f"{key_prefix}{estimator_name}_mse_bregman_pu_bma"] = (
                 (estimate - gt_predictives_bregman_bma).square().mean().item()
             )
@@ -1925,10 +1927,10 @@ def evaluate_on_correlation_of_estimators(
         metrics[f"{key_prefix}correlation_kendall_gal_au_eu_internal_prob"] = float(
             pearsonr(kendall_gal_aleatoric, kendall_gal_epistemic_internal_prob)[0]
         )
-        metrics[f"{key_prefix}rank_correlation_kendall_gal_au_eu_internal_prob"] = (
-            float(
-                spearmanr(kendall_gal_aleatoric, kendall_gal_epistemic_internal_prob)[0]
-            )
+        metrics[
+            f"{key_prefix}rank_correlation_kendall_gal_au_eu_internal_prob"
+        ] = float(
+            spearmanr(kendall_gal_aleatoric, kendall_gal_epistemic_internal_prob)[0]
         )
 
         torch.save(
@@ -1939,12 +1941,10 @@ def evaluate_on_correlation_of_estimators(
         metrics[f"{key_prefix}correlation_kendall_gal_au_eu_internal_logit"] = float(
             pearsonr(kendall_gal_aleatoric, kendall_gal_epistemic_internal_logit)[0]
         )
-        metrics[f"{key_prefix}rank_correlation_kendall_gal_au_eu_internal_logit"] = (
-            float(
-                spearmanr(kendall_gal_aleatoric, kendall_gal_epistemic_internal_logit)[
-                    0
-                ]
-            )
+        metrics[
+            f"{key_prefix}rank_correlation_kendall_gal_au_eu_internal_logit"
+        ] = float(
+            spearmanr(kendall_gal_aleatoric, kendall_gal_epistemic_internal_logit)[0]
         )
 
     return metrics
@@ -2293,9 +2293,9 @@ def get_bundle(
 
         gt_total_predictives_bregman_fbar = torch.empty(num_samples)
         targets["gt_total_predictives_bregman_fbar"] = gt_total_predictives_bregman_fbar
-        estimates["gt_total_predictives_bregman_fbar"] = (
-            gt_total_predictives_bregman_fbar
-        )
+        estimates[
+            "gt_total_predictives_bregman_fbar"
+        ] = gt_total_predictives_bregman_fbar
 
         gt_predictives_bregman_bma = torch.empty(num_samples)
         targets["gt_predictives_bregman_bma"] = gt_predictives_bregman_bma
@@ -2337,9 +2337,9 @@ def get_bundle(
         )  # Just an extra thing to try out
         estimates["one_minus_max_probs_of_fbar"] = one_minus_max_probs_of_fbar
         expected_entropies_plus_expected_divergences = torch.empty(num_samples)
-        estimates["expected_entropies_plus_expected_divergences"] = (
-            expected_entropies_plus_expected_divergences
-        )
+        estimates[
+            "expected_entropies_plus_expected_divergences"
+        ] = expected_entropies_plus_expected_divergences
 
         # EU
         dempster_shafer_values = torch.empty(num_samples)
@@ -2385,13 +2385,13 @@ def get_bundle(
             estimates["mahalanobis_values"] = mahalanobis_values
         elif isinstance(model, HetClassNNWrapper):
             expected_variances_of_internal_probs = torch.empty(num_samples)
-            estimates["expected_variances_of_internal_probs"] = (
-                expected_variances_of_internal_probs
-            )
+            estimates[
+                "expected_variances_of_internal_probs"
+            ] = expected_variances_of_internal_probs
             expected_variances_of_internal_logits = torch.empty(num_samples)
-            estimates["expected_variances_of_internal_logits"] = (
-                expected_variances_of_internal_logits
-            )
+            estimates[
+                "expected_variances_of_internal_logits"
+            ] = expected_variances_of_internal_logits
 
     # This class doesn't return any logits.
     else:
@@ -2781,9 +2781,9 @@ def get_bundle(
             indexed_gt_soft_labels_fbar = targets["gt_soft_labels"].gather(
                 dim=1, index=predicted_labels_fbar_top5
             )
-            targets["gt_soft_fbar_correctnesses_top5"] = (
-                indexed_gt_soft_labels_fbar.max(dim=1)[0]
-            )
+            targets[
+                "gt_soft_fbar_correctnesses_top5"
+            ] = indexed_gt_soft_labels_fbar.max(dim=1)[0]
 
             targets["gt_soft_bma_correctnesses"] = (
                 targets["gt_soft_labels"]
@@ -2850,7 +2850,9 @@ def convert_inference_dict(model, inference_dict, time_forward, args):
 
             digamma_term = torch.digamma(alphas + 1) - torch.digamma(
                 sum_alphas + 1
-            ).unsqueeze(1)  # [B, C]
+            ).unsqueeze(
+                1
+            )  # [B, C]
             expected_entropy = -mean_alphas.mul(digamma_term).sum(dim=1)  # [B]
             converted_inference_dict["expected_entropy"] = expected_entropy
 
@@ -2864,7 +2866,9 @@ def convert_inference_dict(model, inference_dict, time_forward, args):
             if probs.shape[1] > 1:
                 converted_inference_dict["expected_variance_of_probs"] = torch.var(
                     probs, dim=1
-                ).mean(dim=-1)  # [B]
+                ).mean(
+                    dim=-1
+                )  # [B]
             else:
                 converted_inference_dict["expected_variance_of_probs"] = 0
 
@@ -2888,9 +2892,9 @@ def convert_inference_dict(model, inference_dict, time_forward, args):
             converted_inference_dict["max_prob_of_fbar"] = max_prob_of_fbar
 
             jensen_shannon_divergence = entropy_of_bma - expected_entropy
-            converted_inference_dict["jensen_shannon_divergence"] = (
-                jensen_shannon_divergence
-            )
+            converted_inference_dict[
+                "jensen_shannon_divergence"
+            ] = jensen_shannon_divergence
 
             num_classes = alphas.shape[1]
             dempster_shafer_value = num_classes / sum_alphas  # [B]
@@ -2906,14 +2910,18 @@ def convert_inference_dict(model, inference_dict, time_forward, args):
             if logits.shape[1] > 1:
                 converted_inference_dict["expected_variance_of_logits"] = torch.var(
                     logits, dim=1
-                ).mean(dim=-1)  # [B]
+                ).mean(
+                    dim=-1
+                )  # [B]
             else:
                 converted_inference_dict["expected_variance_of_logits"] = 0
 
             if probs.shape[1] > 1:
                 converted_inference_dict["expected_variance_of_probs"] = torch.var(
                     probs, dim=1
-                ).mean(dim=-1)  # [B]
+                ).mean(
+                    dim=-1
+                )  # [B]
             else:
                 converted_inference_dict["expected_variance_of_probs"] = 0
 
@@ -2953,9 +2961,9 @@ def convert_inference_dict(model, inference_dict, time_forward, args):
             converted_inference_dict["max_prob_of_fbar"] = max_prob_of_fbar
 
             jensen_shannon_divergence = entropy_of_bma - expected_entropy
-            converted_inference_dict["jensen_shannon_divergence"] = (
-                jensen_shannon_divergence
-            )
+            converted_inference_dict[
+                "jensen_shannon_divergence"
+            ] = jensen_shannon_divergence
 
             dempster_shafer_value = dempster_shafer_metric(logits.mean(dim=1))
             converted_inference_dict["dempster_shafer_value"] = dempster_shafer_value
@@ -2987,15 +2995,19 @@ def convert_inference_dict(model, inference_dict, time_forward, args):
             internal_probs = log_internal_probs.exp()  # [B, S, C]
 
             if internal_logits.shape[1] > 1:
-                converted_inference_dict["expected_variance_of_internal_logits"] = (
-                    torch.var(internal_logits, dim=1).mean(dim=-1)
+                converted_inference_dict[
+                    "expected_variance_of_internal_logits"
+                ] = torch.var(internal_logits, dim=1).mean(
+                    dim=-1
                 )  # [B]
             else:
                 converted_inference_dict["expected_variance_of_internal_logits"] = 0
 
             if internal_probs.shape[1] > 1:
-                converted_inference_dict["expected_variance_of_internal_probs"] = (
-                    torch.var(internal_probs, dim=1).mean(dim=-1)
+                converted_inference_dict[
+                    "expected_variance_of_internal_probs"
+                ] = torch.var(internal_probs, dim=1).mean(
+                    dim=-1
                 )  # [B]
             else:
                 converted_inference_dict["expected_variance_of_internal_probs"] = 0
