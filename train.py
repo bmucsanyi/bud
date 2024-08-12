@@ -1953,7 +1953,7 @@ def main():
         with open(os.path.join(output_dir, "args.yaml"), "w") as f:
             f.write(args_text)
 
-    if args.epoch > 0:
+    if args.epochs > 0:
         # Setup learning rate schedule and starting epoch
         updates_per_epoch = (
             len(loader_train) + args.accumulation_steps - 1
