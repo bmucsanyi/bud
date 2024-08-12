@@ -330,6 +330,7 @@ def main(args):
                     aggregated_key = None
             else:
                 aggregated_key = None
+            # aggregated_key = "jensen_shannon_divergences"
 
             if aggregated_key is None:
                 operator = min if args.decreasing else max
