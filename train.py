@@ -1974,12 +1974,18 @@ def main():
                 lr_scheduler.step_update(start_epoch * updates_per_epoch)
             else:
                 lr_scheduler.step(start_epoch)
+    else:
+        start_epoch = 0
+        num_epochs = 0
 
     if utils.is_primary(args):
-        logger.info(f"Scheduled epochs: {num_epochs}.")
-        logger.info(
-            f'LR stepped per {"epoch" if lr_scheduler.t_in_epochs else "update"}.'
-        )
+        if num_epochs > 0:
+            logger.info(f"Scheduled epochs: {num_epochs}.")
+            logger.info(
+                f'LR stepped per {"epoch" if lr_scheduler.t_in_epochs else "update"}.'
+            )
+        else:
+            logger.info("Starting post-hoc evaluation.")
 
     time_start_epoch = datetime.now()
     logger.info(
