@@ -1953,26 +1953,27 @@ def main():
         with open(os.path.join(output_dir, "args.yaml"), "w") as f:
             f.write(args_text)
 
-    # Setup learning rate schedule and starting epoch
-    updates_per_epoch = (
-        len(loader_train) + args.accumulation_steps - 1
-    ) // args.accumulation_steps
-    lr_scheduler, num_epochs = create_scheduler(
-        optimizer,
-        **scheduler_kwargs(args),
-        updates_per_epoch=updates_per_epoch,
-    )
-    start_epoch = 0
-    if args.start_epoch is not None:
-        # A specified start_epoch will always override the resume epoch
-        start_epoch = args.start_epoch
-    elif resume_epoch is not None:
-        start_epoch = resume_epoch
-    if lr_scheduler is not None and start_epoch > 0:
-        if args.sched_on_updates:
-            lr_scheduler.step_update(start_epoch * updates_per_epoch)
-        else:
-            lr_scheduler.step(start_epoch)
+    if args.epoch > 0:
+        # Setup learning rate schedule and starting epoch
+        updates_per_epoch = (
+            len(loader_train) + args.accumulation_steps - 1
+        ) // args.accumulation_steps
+        lr_scheduler, num_epochs = create_scheduler(
+            optimizer,
+            **scheduler_kwargs(args),
+            updates_per_epoch=updates_per_epoch,
+        )
+        start_epoch = 0
+        if args.start_epoch is not None:
+            # A specified start_epoch will always override the resume epoch
+            start_epoch = args.start_epoch
+        elif resume_epoch is not None:
+            start_epoch = resume_epoch
+        if lr_scheduler is not None and start_epoch > 0:
+            if args.sched_on_updates:
+                lr_scheduler.step_update(start_epoch * updates_per_epoch)
+            else:
+                lr_scheduler.step(start_epoch)
 
     if utils.is_primary(args):
         logger.info(f"Scheduled epochs: {num_epochs}.")
