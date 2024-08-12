@@ -1990,8 +1990,6 @@ def main():
             logger.info(
                 f'LR stepped per {"epoch" if lr_scheduler.t_in_epochs else "update"}.'
             )
-        else:
-            logger.info("Starting post-hoc evaluation.")
 
     time_start_epoch = datetime.now()
     logger.info(
