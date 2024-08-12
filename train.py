@@ -295,6 +295,12 @@ group.add_argument(
     help="do not evaluate model on the provided OOD test sets (default: False)",
 )
 group.add_argument(
+    "--severities",
+    type=int_list,
+    default=[1, 2, 3, 4, 5],
+    help="OOD severities to evaluate (default: [1, 2, 3, 4, 5])",
+)
+group.add_argument(
     "--test-split-zero-shot",
     metavar="NAME",
     default="test",
@@ -2241,11 +2247,11 @@ def create_datasets(args, num_aug_splits):
     dataset_id_eval_hard.target_transform = hard_target_transform
 
     dataset_locations_ood_eval = {}
-    for severity in range(1, 6):
+    for severity in args.severities:
         dataset_locations_ood_eval[f"{args.dataset_id}S{severity}"] = args.data_dir_id
 
     dataset_locations_ood_test = {}
-    for severity in range(1, 6):
+    for severity in args.severities:
         dataset_locations_ood_test[f"{args.dataset_id}S{severity}"] = args.data_dir_id
 
     dataset_locations_zero_shot_test = {}
