@@ -107,13 +107,13 @@ def add_average_and_flatten(results, key_prefix):
     first_loader_results = results[list(results.keys())[0]]
     for key in first_loader_results:
         if isinstance(first_loader_results[key], Number):
-            avg_results[key] = (
-                torch.tensor(
-                    [loader_result[key] for _, loader_result in results.items()]
-                )
-                .mean()
-                .item()
+            result_vector = torch.tensor(
+                [loader_result[key] for _, loader_result in results.items()]
             )
+            if result_vector.dtype == torch.long:
+                print(key)
+                result_vector = result_vector.float()
+            avg_results[key] = result_vector.mean().item()
     results["avg"] = avg_results
 
     # Flatten output
@@ -2616,7 +2616,7 @@ def get_bundle(
                 current_ind += batch_size
 
         # Aggregate logits and features
-        avg_time_forward = time_forward_m.avg
+        avg_time_forward = model.num_models * time_forward_m.avg
 
         features = temp_features.mean(dim=1)
 
@@ -2870,9 +2870,9 @@ def convert_inference_dict(model, inference_dict, time_forward, args):
                     dim=-1
                 )  # [B]
             else:
-                converted_inference_dict["expected_variance_of_probs"] = 0
+                converted_inference_dict["expected_variance_of_probs"] = 0.0
 
-            converted_inference_dict["expected_variance_of_logits"] = 0
+            converted_inference_dict["expected_variance_of_logits"] = 0.0
 
             expected_max_prob = probs.max(dim=-1)[0].mean(dim=1)
             converted_inference_dict["expected_max_prob"] = expected_max_prob
@@ -2914,7 +2914,7 @@ def convert_inference_dict(model, inference_dict, time_forward, args):
                     dim=-1
                 )  # [B]
             else:
-                converted_inference_dict["expected_variance_of_logits"] = 0
+                converted_inference_dict["expected_variance_of_logits"] = 0.0
 
             if probs.shape[1] > 1:
                 converted_inference_dict["expected_variance_of_probs"] = torch.var(
@@ -2923,7 +2923,7 @@ def convert_inference_dict(model, inference_dict, time_forward, args):
                     dim=-1
                 )  # [B]
             else:
-                converted_inference_dict["expected_variance_of_probs"] = 0
+                converted_inference_dict["expected_variance_of_probs"] = 0.0
 
             log_fbar = F.log_softmax(log_probs.mean(dim=1), dim=-1)  # [B, C]
 
@@ -3001,7 +3001,7 @@ def convert_inference_dict(model, inference_dict, time_forward, args):
                     dim=-1
                 )  # [B]
             else:
-                converted_inference_dict["expected_variance_of_internal_logits"] = 0
+                converted_inference_dict["expected_variance_of_internal_logits"] = 0.0
 
             if internal_probs.shape[1] > 1:
                 converted_inference_dict[
@@ -3010,7 +3010,7 @@ def convert_inference_dict(model, inference_dict, time_forward, args):
                     dim=-1
                 )  # [B]
             else:
-                converted_inference_dict["expected_variance_of_internal_probs"] = 0
+                converted_inference_dict["expected_variance_of_internal_probs"] = 0.0
     else:
         converted_inference_dict["mcinfonce_inverse_kappa"] = inference_dict[
             "mcinfonce_inverse_kappa"
