@@ -110,9 +110,6 @@ def add_average_and_flatten(results, key_prefix):
             result_vector = torch.tensor(
                 [loader_result[key] for _, loader_result in results.items()]
             )
-            if result_vector.dtype == torch.long:
-                print(key)
-                result_vector = result_vector.float()
             avg_results[key] = result_vector.mean().item()
     results["avg"] = avg_results
 
@@ -2580,7 +2577,7 @@ def get_bundle(
     else:
         temp_logits = torch.empty(num_samples, model.num_models, model.num_classes)
         temp_features = torch.empty(num_samples, model.num_models, model.num_features)
-        time_forward_m = AverageMeter()
+        time_forwards = torch.empty(len(loader), model.num_models)
 
         for model_index in range(model.num_models):
             model.load_model(model_index)
@@ -2589,7 +2586,7 @@ def get_bundle(
                 model.to(memory_format=torch.channels_last)
 
             current_ind = 0
-            for input, _ in loader:
+            for i, (input, _) in enumerate(loader):
                 batch_size = input.shape[0]
                 indices = slice(current_ind, current_ind + batch_size)
 
@@ -2608,20 +2605,20 @@ def get_bundle(
 
                 time_forward_end = time.perf_counter()
                 time_forward = time_forward_end - time_forward_start
-                time_forward_m.update(time_forward, batch_size)
 
                 temp_logits[indices, model_index, :] = inference_dict["logit"]
                 temp_features[indices, model_index, :] = inference_dict["feature"]
+                time_forwards[i, model_index] = time_forward
 
                 current_ind += batch_size
 
-        # Aggregate logits and features
-        avg_time_forward = model.num_models * time_forward_m.avg
+        # Aggregate logits, features, and forward times
 
         features = temp_features.mean(dim=1)
+        time_forwards_sum = time_forwards.sum(dim=-1)
 
         current_ind = 0
-        for input, label in loader:
+        for i, (input, label) in enumerate(loader):
             batch_size = input.shape[0]
             indices = slice(current_ind, current_ind + batch_size)
 
@@ -2633,7 +2630,7 @@ def get_bundle(
             inference_dict = convert_inference_dict(
                 model=model,
                 inference_dict=inference_dict,
-                time_forward=avg_time_forward,
+                time_forward=time_forwards_sum[i],
                 args=args,
             )
 
