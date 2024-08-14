@@ -4,10 +4,12 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 import time
+import logging
 
 from bud.utils.replace import replace
 from bud.wrappers.model_wrapper import PosteriorWrapper
 
+logger = logging.getLogger("laplace_wrapper")
 
 class NonInplaceReLU(nn.Module):
     def __init__(self, module):
@@ -65,8 +67,11 @@ class LaplaceWrapper(PosteriorWrapper):
             subset_of_weights=subset_of_weights,
             hessian_structure=self.hessian_structure,
         )
+        logger.info("Starting Laplace approximation.")
         self.laplace_model.fit(train_loader)
+        logger.info("Laplace approximation done.")
 
+        logger.info("Starting prior precision optimization.")
         if self.prior_optimization_method == "CV":
             self.optimize_prior_precision_cv(
                 val_loader=val_loader,
@@ -78,6 +83,7 @@ class LaplaceWrapper(PosteriorWrapper):
                 val_loader=val_loader,
                 link_approx=self.link_approx,
             )
+        logger.info("Prior precision optimization done.")
 
     def forward_head(self, *args, **kwargs):
         # Warning! This class requires extra care, as the predictive samples are
@@ -128,7 +134,7 @@ class LaplaceWrapper(PosteriorWrapper):
             val_loader=val_loader,
         )
 
-        print(f"Optimized prior precision is {self.laplace_model.prior_precision}.")
+        logger.info(f"Optimized prior precision is {self.laplace_model.prior_precision}.")
 
     def gridsearch(
         self,
@@ -138,7 +144,7 @@ class LaplaceWrapper(PosteriorWrapper):
         results = []
         prior_precs = []
         for prior_prec in interval:
-            print(f"Trying {prior_prec}...")
+            logger.info(f"Trying {prior_prec}...")
             start_time = time.perf_counter()
             self.laplace_model.prior_precision = prior_prec
             try:
@@ -150,9 +156,9 @@ class LaplaceWrapper(PosteriorWrapper):
                 )
                 result = self.get_nll(out_dist, targets).item()
             except RuntimeError as error:
-                print(f"Caught an exception in validate: {error}")
+                logger.info(f"Caught an exception in validate: {error}")
                 result = float("inf")
-            print(f"Took {time.perf_counter() - start_time} seconds, result: {result}")
+            logger.info(f"Took {time.perf_counter() - start_time} seconds, result: {result}")
             results.append(result)
             prior_precs.append(prior_prec)
         return prior_precs[np.argmin(results)]
