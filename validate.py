@@ -2397,7 +2397,9 @@ def get_bundle(
 
     if not isinstance(model, DeepEnsembleWrapper):
         current_ind = 0
-        for input, label in loader:
+        len_loader = len(loader)
+
+        for i, (input, label) in enumerate(loader):
             indices = slice(current_ind, current_ind + input.shape[0])
 
             if args.no_prefetcher:
@@ -2412,6 +2414,9 @@ def get_bundle(
                 label = label[:, :-1]
 
             batch_size = input.shape[0]
+
+            if i * batch_size % 128 == 0:
+                print(f"{i}/{len_loader}")
 
             time_forward_start = time.perf_counter()
             with amp_autocast():
