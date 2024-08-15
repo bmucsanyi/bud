@@ -7,9 +7,11 @@ import time
 import logging
 
 from bud.utils.replace import replace
+from bud.utils.metrics import calibration_error
 from bud.wrappers.model_wrapper import PosteriorWrapper
 
 logger = logging.getLogger("laplace_wrapper")
+
 
 class NonInplaceReLU(nn.Module):
     def __init__(self, module):
@@ -51,6 +53,10 @@ class LaplaceWrapper(PosteriorWrapper):
         self.link_approx = link_approx
 
         self.load_model()
+
+        # model.model.fc = nn.Sequential(
+        #     nn.Linear(2048, 96), nn.ReLU(), nn.Linear(96, model.model.num_classes)
+        # )
 
         if not is_last_layer_laplace:
             replace(
@@ -121,6 +127,15 @@ class LaplaceWrapper(PosteriorWrapper):
             out_dist.log().clamp(min=torch.finfo(out_dist.dtype).min), targets
         )
 
+    @staticmethod
+    def get_ece(out_dist, targets):
+        confidences, predictions = out_dist.max(dim=-1)  # [B]
+        correctnesses = predictions.eq(targets).int()
+
+        return calibration_error(
+            confidences=confidences, correctnesses=correctnesses, num_bins=15, norm="l1"
+        )
+
     def optimize_prior_precision_cv(
         self,
         val_loader,
@@ -134,7 +149,9 @@ class LaplaceWrapper(PosteriorWrapper):
             val_loader=val_loader,
         )
 
-        logger.info(f"Optimized prior precision is {self.laplace_model.prior_precision}.")
+        logger.info(
+            f"Optimized prior precision is {self.laplace_model.prior_precision}."
+        )
 
     def gridsearch(
         self,
@@ -154,11 +171,13 @@ class LaplaceWrapper(PosteriorWrapper):
                     link_approx=self.link_approx,
                     n_samples=self.num_mc_samples_cv,
                 )
-                result = self.get_nll(out_dist, targets).item()
+                result = self.get_ece(out_dist, targets).item()
             except RuntimeError as error:
                 logger.info(f"Caught an exception in validate: {error}")
                 result = float("inf")
-            logger.info(f"Took {time.perf_counter() - start_time} seconds, result: {result}")
+            logger.info(
+                f"Took {time.perf_counter() - start_time} seconds, result: {result}"
+            )
             results.append(result)
             prior_precs.append(prior_prec)
         return prior_precs[np.argmin(results)]
