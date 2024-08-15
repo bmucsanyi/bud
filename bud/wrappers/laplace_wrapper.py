@@ -56,10 +56,6 @@ class LaplaceWrapper(PosteriorWrapper):
 
         self.load_model()
 
-        # model.model.fc = nn.Sequential(
-        #     nn.Linear(2048, 96), nn.ReLU(), nn.Linear(96, model.model.num_classes)
-        # )
-
         if not is_last_layer_laplace:
             replace(
                 model,
@@ -165,16 +161,18 @@ class LaplaceWrapper(PosteriorWrapper):
             logger.info(f"Trying {prior_prec}...")
             start_time = time.perf_counter()
             self.laplace_model.prior_precision = prior_prec
-            # try:
-            out_dist, targets = self.validate(
-                val_loader=val_loader,
-                pred_type=self.pred_type,
-                num_samples=self.num_mc_samples_cv,
-            )
-            result = self.get_ece(out_dist, targets).item()
-            # except RuntimeError as error:
-            #     logger.info(f"Caught an exception in validate: {error}")
-            #     result = float("inf")
+
+            try:
+                out_dist, targets = self.validate(
+                    val_loader=val_loader,
+                    pred_type=self.pred_type,
+                    num_samples=self.num_mc_samples_cv,
+                )
+                result = self.get_ece(out_dist, targets).item()
+            except RuntimeError as error:
+                logger.info(f"Caught an exception in validate: {error}")
+                result = float("inf")
+
             logger.info(
                 f"Took {time.perf_counter() - start_time} seconds, result: {result}"
             )
