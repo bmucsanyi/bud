@@ -5,6 +5,8 @@ import torch.nn.functional as F
 import numpy as np
 import time
 import logging
+from torch.nn.utils import vector_to_parameters
+from torch.distributions import MultivariateNormal
 
 from bud.utils.replace import replace
 from bud.utils.metrics import calibration_error
@@ -80,7 +82,6 @@ class LaplaceWrapper(PosteriorWrapper):
         logger.info("Starting prior precision optimization.")
         if self.prior_optimization_method == "CV":
             # To get logits instead of probs
-            self.laplace_model.likelihood = "regression"
             self.optimize_prior_precision_cv(
                 val_loader=val_loader,
             )
@@ -91,7 +92,6 @@ class LaplaceWrapper(PosteriorWrapper):
                 val_loader=val_loader,
                 link_approx=self.link_approx,
             )
-            self.laplace_model.likelihood = "regression"
         logger.info("Prior precision optimization done.")
 
     def forward_head(self, *args, **kwargs):
@@ -113,10 +113,10 @@ class LaplaceWrapper(PosteriorWrapper):
             )
 
             return {
-                "logit": self.laplace_model.predictive_samples(
+                "logit": self.predictive_samples(
                     x=inputs,
                     pred_type=self.pred_type,
-                    n_samples=self.num_mc_samples,
+                    num_samples=self.num_mc_samples,
                 )
                 .permute(1, 0, 2),  # [B, S, C]
                 "feature": feature,
@@ -169,7 +169,7 @@ class LaplaceWrapper(PosteriorWrapper):
                 out_dist, targets = self.validate(
                     val_loader=val_loader,
                     pred_type=self.pred_type,
-                    n_samples=self.num_mc_samples_cv,
+                    num_samples=self.num_mc_samples_cv,
                 )
                 result = self.get_ece(out_dist, targets).item()
             except RuntimeError as error:
@@ -184,24 +184,75 @@ class LaplaceWrapper(PosteriorWrapper):
 
     @torch.no_grad()
     def validate(
-        self, val_loader, pred_type="glm", n_samples=100
+        self, val_loader, pred_type="glm", num_samples=100
     ):
         self.laplace_model.model.eval()
         output_means = []
         targets = []
+
         for X, y in val_loader:
             X, y = X.to(self.laplace_model._device), y.to(self.laplace_model._device)
-            # out = self.laplace_model(
-            #     X, pred_type=pred_type, link_approx=link_approx, n_samples=n_samples
-            # )
-            out = self.laplace_model.predictive_samples(
+            out = self.predictive_samples(
                 x=X,
                 pred_type=pred_type,
-                n_samples=n_samples,
-            ).permute(1, 0, 2),  # [B, S, C]
+                num_samples=num_samples,
+            )  # [B, S, C]
             out = F.softmax(out, dim=-1).mean(dim=1)  # [B, C]
 
             output_means.append(out)
             targets.append(y)
 
         return torch.cat(output_means, dim=0), torch.cat(targets, dim=0)
+
+    def nn_predictive_samples(self, X, num_samples=100):
+        fs = []
+
+        for sample in self.sample(num_samples):
+            vector_to_parameters(sample, self.laplace_model.model.last_layer.parameters())
+            fs.append(self.laplace_model.model(X.to(self.laplace_model._device)).detach())
+
+        vector_to_parameters(self.laplace_model.mean, self.laplace_model.model.last_layer.parameters())
+        fs = torch.stack(fs)
+
+        return fs.permute(1, 0, 2)
+
+    def glm_predictive_distribution(self, X):
+        Js, f_mu = self.laplace_model.backend.last_layer_jacobians(X)
+        f_var = self.laplace_model.functional_variance(Js)
+
+        return f_mu.detach(), f_var.detach()
+
+    def predictive_samples(self, x, pred_type='glm', num_samples=100):
+        """Sample from the posterior predictive on input data `x`.
+        Can be used, for example, for Thompson sampling.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            input data `(batch_size, input_shape)`
+
+        pred_type : {'glm', 'nn'}, default='glm'
+            type of posterior predictive, linearized GLM predictive or neural
+            network sampling predictive. The GLM predictive is consistent with
+            the curvature approximations used here.
+
+        num_samples : int
+            number of samples
+
+        Returns
+        -------
+        samples : torch.Tensor
+            samples `(batch_size, num_samples, output_shape)`
+        """
+        if pred_type not in ['glm', 'nn']:
+            raise ValueError('Only glm and nn supported as prediction types.')
+
+        if pred_type == 'glm':
+            f_mu, f_var = self.glm_predictive_distribution(x)
+            dist = MultivariateNormal(f_mu, f_var)
+            samples = dist.sample((num_samples,))
+
+            return samples.permute(1, 0, 2)
+
+        else:  # 'nn'
+            return self.nn_predictive_samples(x, num_samples)
