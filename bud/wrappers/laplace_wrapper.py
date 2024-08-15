@@ -207,7 +207,7 @@ class LaplaceWrapper(PosteriorWrapper):
     def nn_predictive_samples(self, X, num_samples=100):
         fs = []
 
-        for sample in self.sample(num_samples):
+        for sample in self.laplace_model.sample(num_samples):
             vector_to_parameters(sample, self.laplace_model.model.last_layer.parameters())
             fs.append(self.laplace_model.model(X.to(self.laplace_model._device)).detach())
 
