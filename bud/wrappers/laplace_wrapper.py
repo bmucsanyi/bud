@@ -113,8 +113,9 @@ class LaplaceWrapper(PosteriorWrapper):
                     x=inputs,
                     pred_type=self.pred_type,
                     num_samples=self.num_mc_samples,
-                )
-                .permute(1, 0, 2),  # [B, S, C]
+                ).permute(
+                    1, 0, 2
+                ),  # [B, S, C]
                 "feature": feature,
             }
 
@@ -182,9 +183,7 @@ class LaplaceWrapper(PosteriorWrapper):
         return prior_precs[np.argmin(results)]
 
     @torch.no_grad()
-    def validate(
-        self, val_loader, pred_type="glm", num_samples=100
-    ):
+    def validate(self, val_loader, pred_type="glm", num_samples=100):
         self.laplace_model.model.eval()
         output_means = []
         targets = []
@@ -207,10 +206,16 @@ class LaplaceWrapper(PosteriorWrapper):
         fs = []
 
         for sample in self.laplace_model.sample(num_samples):
-            vector_to_parameters(sample, self.laplace_model.model.last_layer.parameters())
-            fs.append(self.laplace_model.model(X.to(self.laplace_model._device)).detach())
+            vector_to_parameters(
+                sample, self.laplace_model.model.last_layer.parameters()
+            )
+            fs.append(
+                self.laplace_model.model(X.to(self.laplace_model._device)).detach()
+            )
 
-        vector_to_parameters(self.laplace_model.mean, self.laplace_model.model.last_layer.parameters())
+        vector_to_parameters(
+            self.laplace_model.mean, self.laplace_model.model.last_layer.parameters()
+        )
         fs = torch.stack(fs)
 
         return fs.permute(1, 0, 2)
@@ -221,7 +226,7 @@ class LaplaceWrapper(PosteriorWrapper):
 
         return f_mu.detach(), f_var.detach()
 
-    def predictive_samples(self, x, pred_type='glm', num_samples=100):
+    def predictive_samples(self, x, pred_type="glm", num_samples=100):
         """Sample from the posterior predictive on input data `x`.
         Can be used, for example, for Thompson sampling.
 
@@ -243,10 +248,10 @@ class LaplaceWrapper(PosteriorWrapper):
         samples : torch.Tensor
             samples `(batch_size, num_samples, output_shape)`
         """
-        if pred_type not in ['glm', 'nn']:
-            raise ValueError('Only glm and nn supported as prediction types.')
+        if pred_type not in ["glm", "nn"]:
+            raise ValueError("Only glm and nn supported as prediction types.")
 
-        if pred_type == 'glm':
+        if pred_type == "glm":
             f_mu, f_var = self.glm_predictive_distribution(x)
             dist = MultivariateNormal(f_mu, f_var)
             samples = dist.sample((num_samples,))

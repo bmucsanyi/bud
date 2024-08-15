@@ -148,16 +148,22 @@ def calculate_bin_metrics(
     indices = torch.bucketize(confidences.contiguous(), bin_boundaries) - 1
     indices = torch.clamp(indices, min=0, max=num_bins - 1)
 
-    bin_counts = torch.zeros(num_bins, dtype=confidences.dtype, device=confidences.device)
+    bin_counts = torch.zeros(
+        num_bins, dtype=confidences.dtype, device=confidences.device
+    )
     bin_counts.scatter_add_(dim=0, index=indices, src=torch.ones_like(confidences))
     bin_proportions = bin_counts / bin_counts.sum()
     pos_counts = bin_counts > 0
 
-    bin_confidences = torch.zeros(num_bins, dtype=confidences.dtype)
+    bin_confidences = torch.zeros(
+        num_bins, dtype=confidences.dtype, device=confidences.device
+    )
     bin_confidences.scatter_add_(dim=0, index=indices, src=confidences)
     bin_confidences[pos_counts] /= bin_counts[pos_counts]
 
-    bin_accuracies = torch.zeros(num_bins, dtype=correctnesses.dtype)
+    bin_accuracies = torch.zeros(
+        num_bins, dtype=correctnesses.dtype, device=confidences.device
+    )
     bin_accuracies.scatter_add_(dim=0, index=indices, src=correctnesses)
     bin_accuracies[pos_counts] /= bin_counts[pos_counts]
 
