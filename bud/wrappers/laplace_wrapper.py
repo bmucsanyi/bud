@@ -137,8 +137,8 @@ class LaplaceWrapper(PosteriorWrapper):
     def optimize_prior_precision_cv(
         self,
         val_loader,
-        log_prior_prec_min=-4,
-        log_prior_prec_max=4,
+        log_prior_prec_min=-1,
+        log_prior_prec_max=3,
         grid_size=100,
     ):
         interval = torch.logspace(log_prior_prec_min, log_prior_prec_max, grid_size)
