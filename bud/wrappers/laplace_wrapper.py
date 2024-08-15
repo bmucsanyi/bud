@@ -79,6 +79,8 @@ class LaplaceWrapper(PosteriorWrapper):
 
         logger.info("Starting prior precision optimization.")
         if self.prior_optimization_method == "CV":
+            # To get logits instead of probs
+            self.laplace_model.likelihood = "regression"
             self.optimize_prior_precision_cv(
                 val_loader=val_loader,
             )
@@ -89,6 +91,7 @@ class LaplaceWrapper(PosteriorWrapper):
                 val_loader=val_loader,
                 link_approx=self.link_approx,
             )
+            self.laplace_model.likelihood = "regression"
         logger.info("Prior precision optimization done.")
 
     def forward_head(self, *args, **kwargs):
@@ -115,8 +118,6 @@ class LaplaceWrapper(PosteriorWrapper):
                     pred_type=self.pred_type,
                     n_samples=self.num_mc_samples,
                 )
-                .log()
-                .clamp(min=torch.finfo(feature.dtype).min)
                 .permute(1, 0, 2),  # [B, S, C]
                 "feature": feature,
             }
@@ -168,7 +169,6 @@ class LaplaceWrapper(PosteriorWrapper):
                 out_dist, targets = self.validate(
                     val_loader=val_loader,
                     pred_type=self.pred_type,
-                    link_approx=self.link_approx,
                     n_samples=self.num_mc_samples_cv,
                 )
                 result = self.get_ece(out_dist, targets).item()
@@ -184,16 +184,22 @@ class LaplaceWrapper(PosteriorWrapper):
 
     @torch.no_grad()
     def validate(
-        self, val_loader, pred_type="glm", link_approx="probit", n_samples=100
+        self, val_loader, pred_type="glm", n_samples=100
     ):
         self.laplace_model.model.eval()
         output_means = []
         targets = []
         for X, y in val_loader:
             X, y = X.to(self.laplace_model._device), y.to(self.laplace_model._device)
-            out = self.laplace_model(
-                X, pred_type=pred_type, link_approx=link_approx, n_samples=n_samples
-            )
+            # out = self.laplace_model(
+            #     X, pred_type=pred_type, link_approx=link_approx, n_samples=n_samples
+            # )
+            out = self.laplace_model.predictive_samples(
+                x=X,
+                pred_type=pred_type,
+                n_samples=n_samples,
+            ).permute(1, 0, 2),  # [B, S, C]
+            out = F.softmax(out, dim=-1).mean(dim=1)  # [B, C]
 
             output_means.append(out)
             targets.append(y)
