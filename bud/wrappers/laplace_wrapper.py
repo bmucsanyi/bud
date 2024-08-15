@@ -165,21 +165,22 @@ class LaplaceWrapper(PosteriorWrapper):
             logger.info(f"Trying {prior_prec}...")
             start_time = time.perf_counter()
             self.laplace_model.prior_precision = prior_prec
-            try:
-                out_dist, targets = self.validate(
-                    val_loader=val_loader,
-                    pred_type=self.pred_type,
-                    num_samples=self.num_mc_samples_cv,
-                )
-                result = self.get_ece(out_dist, targets).item()
-            except RuntimeError as error:
-                logger.info(f"Caught an exception in validate: {error}")
-                result = float("inf")
+            # try:
+            out_dist, targets = self.validate(
+                val_loader=val_loader,
+                pred_type=self.pred_type,
+                num_samples=self.num_mc_samples_cv,
+            )
+            result = self.get_ece(out_dist, targets).item()
+            # except RuntimeError as error:
+            #     logger.info(f"Caught an exception in validate: {error}")
+            #     result = float("inf")
             logger.info(
                 f"Took {time.perf_counter() - start_time} seconds, result: {result}"
             )
             results.append(result)
             prior_precs.append(prior_prec)
+
         return prior_precs[np.argmin(results)]
 
     @torch.no_grad()
@@ -253,6 +254,5 @@ class LaplaceWrapper(PosteriorWrapper):
             samples = dist.sample((num_samples,))
 
             return samples.permute(1, 0, 2)
-
         else:  # 'nn'
             return self.nn_predictive_samples(x, num_samples)
