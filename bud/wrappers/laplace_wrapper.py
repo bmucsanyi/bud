@@ -113,8 +113,6 @@ class LaplaceWrapper(PosteriorWrapper):
                     x=inputs,
                     pred_type=self.pred_type,
                     num_samples=self.num_mc_samples,
-                ).permute(
-                    1, 0, 2
                 ),  # [B, S, C]
                 "feature": feature,
             }
