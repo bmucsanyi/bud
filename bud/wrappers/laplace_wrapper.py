@@ -12,7 +12,7 @@ from bud.utils.replace import replace
 from bud.utils.metrics import calibration_error
 from bud.wrappers.model_wrapper import PosteriorWrapper
 
-logger = logging.getLogger("laplace_wrapper")
+logger = logging.getLogger(__name__)
 
 
 class NonInplaceReLU(nn.Module):
@@ -108,7 +108,7 @@ class LaplaceWrapper(PosteriorWrapper):
             )
 
             return {
-                "logit": self.predictive_samples(
+                "logit": self.logit_samples(
                     x=inputs,
                     pred_type=self.pred_type,
                     num_samples=self.num_mc_samples,
@@ -187,19 +187,19 @@ class LaplaceWrapper(PosteriorWrapper):
 
         for X, y in val_loader:
             X, y = X.to(self.laplace_model._device), y.to(self.laplace_model._device)
-            out = self.predictive_samples(
+            out = self.logit_samples(
                 x=X,
                 pred_type=pred_type,
                 num_samples=num_samples,
             )  # [B, S, C]
-            out = F.softmax(out, dim=-1).mean(dim=1)  # [B, C]
+            out = F.log_softmax(out, dim=-1).exp().mean(dim=1)  # [B, C]
 
             output_means.append(out)
             targets.append(y)
 
         return torch.cat(output_means, dim=0), torch.cat(targets, dim=0)
 
-    def nn_predictive_samples(self, X, num_samples=100):
+    def nn_logit_samples(self, X, num_samples=100):
         fs = []
 
         for sample in self.laplace_model.sample(num_samples):
@@ -217,14 +217,14 @@ class LaplaceWrapper(PosteriorWrapper):
 
         return fs.permute(1, 0, 2)
 
-    def glm_predictive_distribution(self, X):
+    def glm_logit_distribution(self, X):
         Js, f_mu = self.laplace_model.backend.last_layer_jacobians(X)
         f_var = self.laplace_model.functional_variance(Js)
 
         return f_mu.detach(), f_var.detach()
 
-    def predictive_samples(self, x, pred_type="glm", num_samples=100):
-        """Sample from the posterior predictive on input data `x`.
+    def logit_samples(self, x, pred_type="glm", num_samples=100):
+        """Sample from the posterior logits on input data `x`.
         Can be used, for example, for Thompson sampling.
 
         Parameters
@@ -249,10 +249,10 @@ class LaplaceWrapper(PosteriorWrapper):
             raise ValueError("Only glm and nn supported as prediction types.")
 
         if pred_type == "glm":
-            f_mu, f_var = self.glm_predictive_distribution(x)
+            f_mu, f_var = self.glm_logit_distribution(x)
             dist = MultivariateNormal(f_mu, f_var)
             samples = dist.sample((num_samples,))
 
             return samples.permute(1, 0, 2)
         else:  # 'nn'
-            return self.nn_predictive_samples(x, num_samples)
+            return self.nn_logit_samples(x, num_samples)
