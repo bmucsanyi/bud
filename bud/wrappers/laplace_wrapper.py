@@ -8,20 +8,10 @@ import logging
 from torch.nn.utils import vector_to_parameters
 from torch.distributions import MultivariateNormal
 
-from bud.utils.replace import replace
 from bud.utils.metrics import calibration_error
 from bud.wrappers.model_wrapper import PosteriorWrapper
 
 logger = logging.getLogger(__name__)
-
-
-class NonInplaceReLU(nn.Module):
-    def __init__(self, module):
-        super().__init__()
-        self.relu = nn.ReLU(inplace=False)
-
-    def forward(self, inputs):
-        return self.relu(inputs)
 
 
 class LaplaceWrapper(PosteriorWrapper):
@@ -36,11 +26,8 @@ class LaplaceWrapper(PosteriorWrapper):
         num_mc_samples: int,
         num_mc_samples_cv: int,
         weight_path: str,
-        is_last_layer_laplace: bool,
         pred_type: str,  # "glm", "nn"
-        prior_optimization_method: str,  # "marglik", "CV"
-        hessian_structure: str,  # "kron", "full"
-        link_approx: str,  # "probit", "mc"
+        hessian_structure: str,  # "kron", "full", "diag"
     ):
         super().__init__(model)
 
@@ -48,27 +35,16 @@ class LaplaceWrapper(PosteriorWrapper):
         self.num_mc_samples_cv = num_mc_samples_cv
         self.weight_path = weight_path
         self.laplace_model = None
-        self.is_last_layer_laplace = is_last_layer_laplace
         self.pred_type = pred_type
-        self.prior_optimization_method = prior_optimization_method
         self.hessian_structure = hessian_structure
-        self.link_approx = link_approx
 
         self.load_model()
 
-        if not is_last_layer_laplace:
-            replace(
-                model,
-                "ReLU",
-                NonInplaceReLU,
-            )
-
     def perform_laplace_approximation(self, train_loader, val_loader):
-        subset_of_weights = "last_layer" if self.is_last_layer_laplace else "all"
         self.laplace_model = Laplace(
             self.model,
             "classification",
-            subset_of_weights=subset_of_weights,
+            subset_of_weights="last_layer",
             hessian_structure=self.hessian_structure,
         )
         logger.info("Starting Laplace approximation.")
@@ -76,17 +52,9 @@ class LaplaceWrapper(PosteriorWrapper):
         logger.info("Laplace approximation done.")
 
         logger.info("Starting prior precision optimization.")
-        if self.prior_optimization_method == "CV":
-            self.optimize_prior_precision_cv(
-                val_loader=val_loader,
-            )
-        else:
-            self.laplace_model.optimize_prior_precision(
-                method=self.prior_optimization_method,
-                pred_type=self.pred_type,
-                val_loader=val_loader,
-                link_approx=self.link_approx,
-            )
+        self.optimize_prior_precision_cv(
+            val_loader=val_loader,
+        )
         logger.info("Prior precision optimization done.")
 
     def forward_head(self, *args, **kwargs):
@@ -110,17 +78,10 @@ class LaplaceWrapper(PosteriorWrapper):
             return {
                 "logit": self.logit_samples(
                     x=inputs,
-                    pred_type=self.pred_type,
                     num_samples=self.num_mc_samples,
                 ),  # [B, S, C]
                 "feature": feature,
             }
-
-    @staticmethod
-    def get_nll(out_dist, targets):
-        return F.nll_loss(
-            out_dist.log().clamp(min=torch.finfo(out_dist.dtype).min), targets
-        )
 
     @staticmethod
     def get_ece(out_dist, targets):
@@ -163,16 +124,16 @@ class LaplaceWrapper(PosteriorWrapper):
             try:
                 out_dist, targets = self.validate(
                     val_loader=val_loader,
-                    pred_type=self.pred_type,
-                    num_samples=self.num_mc_samples_cv,
                 )
                 result = self.get_ece(out_dist, targets).item()
+                accuracy = out_dist.argmax(dim=-1).eq(targets).float().mean()
             except RuntimeError as error:
                 logger.info(f"Caught an exception in validate: {error}")
                 result = float("inf")
 
             logger.info(
-                f"Took {time.perf_counter() - start_time} seconds, result: {result}"
+                f"Took {time.perf_counter() - start_time} seconds, result: {result}, "
+                f"accuracy {accuracy}"
             )
             results.append(result)
             prior_precs.append(prior_prec)
@@ -180,7 +141,7 @@ class LaplaceWrapper(PosteriorWrapper):
         return prior_precs[np.argmin(results)]
 
     @torch.no_grad()
-    def validate(self, val_loader, pred_type="glm", num_samples=100):
+    def validate(self, val_loader):
         self.laplace_model.model.eval()
         output_means = []
         targets = []
@@ -189,8 +150,7 @@ class LaplaceWrapper(PosteriorWrapper):
             X, y = X.to(self.laplace_model._device), y.to(self.laplace_model._device)
             out = self.logit_samples(
                 x=X,
-                pred_type=pred_type,
-                num_samples=num_samples,
+                num_samples=self.num_mc_samples_cv,
             )  # [B, S, C]
             out = F.log_softmax(out, dim=-1).exp().mean(dim=1)  # [B, C]
 
@@ -223,7 +183,7 @@ class LaplaceWrapper(PosteriorWrapper):
 
         return f_mu.detach(), f_var.detach()
 
-    def logit_samples(self, x, pred_type="glm", num_samples=100):
+    def logit_samples(self, x, num_samples=100):
         """Sample from the posterior logits on input data `x`.
         Can be used, for example, for Thompson sampling.
 
@@ -245,10 +205,10 @@ class LaplaceWrapper(PosteriorWrapper):
         samples : torch.Tensor
             samples `(batch_size, num_samples, output_shape)`
         """
-        if pred_type not in ["glm", "nn"]:
+        if self.pred_type not in ["glm", "nn"]:
             raise ValueError("Only glm and nn supported as prediction types.")
 
-        if pred_type == "glm":
+        if self.pred_type == "glm":
             f_mu, f_var = self.glm_logit_distribution(x)
             dist = MultivariateNormal(f_mu, f_var)
             samples = dist.sample((num_samples,))

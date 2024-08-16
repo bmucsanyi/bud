@@ -452,34 +452,16 @@ group.add_argument(
     help=("temperature in the HET-XL method (default: 1)"),
 )
 group.add_argument(
-    "--is-last-layer-laplace",
-    action="store_true",
-    default=False,
-    help="whether to use only a last layer Laplace approximation (default: False)",
-)
-group.add_argument(
     "--pred-type",
     default="glm",
     type=str,
     help='prediction type used by Laplace (default: "glm")',
 )
 group.add_argument(
-    "--prior-optimization-method",
-    default="CV",
-    type=str,
-    help='prior optimization method used by Laplace (default: "CV")',
-)
-group.add_argument(
     "--hessian-structure",
     default="kron",
     type=str,
     help='Hessian structure method used by Laplace (default: "kron")',
-)
-group.add_argument(
-    "--link-approx",
-    default="probit",
-    type=str,
-    help='link approximation used by Laplace (default: "probit")',
 )
 group.add_argument(
     "--magnitude",
@@ -1629,11 +1611,8 @@ def main():
         matrix_rank=args.matrix_rank,
         is_het=args.is_het,
         temperature=args.temperature,
-        is_last_layer_laplace=args.is_last_layer_laplace,
         pred_type=args.pred_type,
-        prior_optimization_method=args.prior_optimization_method,
         hessian_structure=args.hessian_structure,
-        link_approx=args.link_approx,
         magnitude=args.magnitude,
         initial_average_kappa=args.initial_average_kappa,
         num_heads=args.num_heads,
