@@ -130,7 +130,7 @@ class LaplaceWrapper(PosteriorWrapper):
             except RuntimeError as error:
                 logger.info(f"Caught an exception in validate: {error}")
                 result = float("inf")
-
+                accuracy = float("NaN")
             logger.info(
                 f"Took {time.perf_counter() - start_time} seconds, result: {result}, "
                 f"accuracy {accuracy}"
