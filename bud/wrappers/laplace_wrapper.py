@@ -77,7 +77,6 @@ class LaplaceWrapper(PosteriorWrapper):
 
         logger.info("Starting prior precision optimization.")
         if self.prior_optimization_method == "CV":
-            # To get logits instead of probs
             self.optimize_prior_precision_cv(
                 val_loader=val_loader,
             )
