@@ -14,6 +14,9 @@ from typing import Optional
 import torch
 import torch.distributed as dist
 from PIL import Image
+import logging
+
+logger = logging.getLogger(__name__)
 
 try:
     import tensorflow as tf
@@ -29,7 +32,7 @@ try:
         )  # non-buggy even_splits has drop_remainder arg
         has_buggy_even_splits = False
     except TypeError:
-        print(
+        logger.warning(
             "Warning: This version of tfds doesn't have the latest even_splits impl. "
             "Please update or use tfds-nightly for better fine-grained split behaviour."
         )
@@ -38,12 +41,11 @@ try:
     # import resource
     # low, high = resource.getrlimit(resource.RLIMIT_NOFILE)
     # resource.setrlimit(resource.RLIMIT_NOFILE, (high, high))
-except ImportError as e:
-    print(e)
-    print(
+except ImportError:
+    logger.error(
         "Please install tensorflow_datasets package `pip install tensorflow-datasets`."
     )
-    exit(1)
+    raise
 
 from .class_map import load_class_map
 from .reader import Reader

@@ -205,7 +205,6 @@ def resize_rel_pos_bias_table(
         has_flat_shape = True
 
     if src_size[0] != dst_size[0] or src_size[1] != dst_size[1]:
-        # print("Interpolating position from %dx%d to %dx%d" % (src_size[0], src_size[1], dst_size[0], dst_size[1]))
         if num_extra_tokens:
             extra_tokens = rel_pos_bias[-num_extra_tokens:, :]
             rel_pos_bias = rel_pos_bias[:-num_extra_tokens, :]
@@ -236,14 +235,12 @@ def resize_rel_pos_bias_table(
         y = _calc(src_size[0], dst_size[0])
         x = _calc(src_size[1], dst_size[1])
         yx = [torch.tensor(y), torch.tensor(x)]
-        # print("Original positions = %s" % str(x))
 
         ty = dst_size[0] // 2.0
         tx = dst_size[1] // 2.0
         dy = torch.arange(-ty, ty + 0.1, 1.0)
         dx = torch.arange(-tx, tx + 0.1, 1.0)
         dyx = torch.meshgrid([dy, dx])
-        # print("Target positions = %s" % str(dx))
 
         all_rel_pos_bias = []
         for i in range(num_attn_heads):

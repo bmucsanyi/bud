@@ -32,8 +32,7 @@ def add_ml_decoder_head(model):
             num_classes=num_classes, initial_num_features=num_features
         )
     else:
-        print("Model code-writing is not aligned currently with ml-decoder")
-        exit(-1)
+        raise ValueError("Model code-writing is not aligned currently with ml-decoder")
     if hasattr(model, "drop_rate"):  # Ml-Decoder has inner dropout
         model.drop_rate = 0
     return model

@@ -104,7 +104,7 @@ except ImportError:
 has_compile = hasattr(torch, "compile")
 
 
-logger = logging.getLogger("train")
+logger = logging.getLogger(__name__)
 
 
 def float_list(string):

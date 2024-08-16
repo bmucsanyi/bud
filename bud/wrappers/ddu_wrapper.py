@@ -8,6 +8,7 @@ from functools import partial
 import torch
 from torch import nn
 import warnings
+import logging
 
 from bud.utils.replace import register, replace, register_cond
 from bud.wrappers.temperature_wrapper import TemperatureWrapper
@@ -21,6 +22,8 @@ from bud.wrappers.sngp_wrapper import (
 
 DOUBLE_INFO = torch.finfo(torch.double)
 JITTERS = [10**exp for exp in range(-25, 0, 1)]
+
+logger = logging.getLogger(__name__)
 
 
 class DDUWrapper(TemperatureWrapper):
@@ -203,7 +206,7 @@ class DDUWrapper(TemperatureWrapper):
         )  # [C, D, D]
 
         for jitter_eps in JITTERS:
-            print("Trying", jitter_eps, "...")
+            logger.info("Trying", jitter_eps, "...")
             try:
                 jitter = jitter_eps * torch.eye(
                     classwise_cov_features.shape[1]
@@ -226,6 +229,6 @@ class DDUWrapper(TemperatureWrapper):
                 continue
             break
 
-        print("Used jitter:", jitter_eps)
+        logger.info("Used jitter:", jitter_eps)
 
         assert self.gmm is not None

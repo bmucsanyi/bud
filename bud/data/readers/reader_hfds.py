@@ -8,12 +8,15 @@ import math
 import torch
 import torch.distributed as dist
 from PIL import Image
+import logging
+
+logger = logging.getLogger(__name__)
 
 try:
     import datasets
-except ImportError as e:
-    print("Please install Hugging Face datasets package `pip install datasets`.")
-    exit(1)
+except ImportError:
+    logger.info("Please install Hugging Face datasets package `pip install datasets`.")
+    raise
 from .class_map import load_class_map
 from .reader import Reader
 
