@@ -833,9 +833,9 @@ group.add_argument(
 )
 group.add_argument("--model-kwargs", default={}, action=utils.ParseKwargs, type=str)
 
-# Scripting / codegen
-scripting_group = group.add_argument_group("Scripting")
-scripting_group.add_argument(
+# Scripting
+group = parser.add_argument_group("Scripting")
+group.add_argument(
     "--torchcompile",
     nargs="?",
     type=str,
