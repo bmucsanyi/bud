@@ -64,22 +64,24 @@ class LaplaceWrapper(PosteriorWrapper):
         # with `forward_features` and the logits with `forward`.
         raise ValueError(f"forward_head cannot be called directly for {type(self)}")
 
-    def forward(self, inputs):
+    def forward(self, input):
         if self.laplace_model is None:
             raise ValueError("Model has to be Laplace-approximated first.")
 
         if self.training:
-            return self.model(inputs)
+            return self.model(input)
         else:
             feature = self.model.forward_head(
-                self.model.forward_features(inputs), pre_logits=True
+                self.model.forward_features(input), pre_logits=True
             )
 
+            logit = self.logit_samples(
+                input=input if self.pred_type == "glm" else feature,
+                num_samples=self.num_mc_samples,
+            )  # [B, S, C]
+
             return {
-                "logit": self.logit_samples(
-                    x=inputs,
-                    num_samples=self.num_mc_samples,
-                ),  # [B, S, C]
+                "logit": logit,
                 "feature": feature,
             }
 
@@ -96,7 +98,7 @@ class LaplaceWrapper(PosteriorWrapper):
         self,
         val_loader,
         log_prior_prec_min=-1,
-        log_prior_prec_max=3,
+        log_prior_prec_max=2,
         grid_size=100,
     ):
         interval = torch.logspace(log_prior_prec_min, log_prior_prec_max, grid_size)
@@ -146,20 +148,22 @@ class LaplaceWrapper(PosteriorWrapper):
         output_means = []
         targets = []
 
-        for X, y in val_loader:
-            X, y = X.to(self.laplace_model._device), y.to(self.laplace_model._device)
+        for input, target in val_loader:
+            input = input.to(self.laplace_model._device)
+            target = target.to(self.laplace_model._device)
+
             out = self.logit_samples(
-                x=X,
+                input=input,
                 num_samples=self.num_mc_samples_cv,
             )  # [B, S, C]
-            out = F.log_softmax(out, dim=-1).exp().mean(dim=1)  # [B, C]
+            out = F.softmax(out, dim=-1).mean(dim=1)  # [B, C]
 
             output_means.append(out)
-            targets.append(y)
+            targets.append(target)
 
         return torch.cat(output_means, dim=0), torch.cat(targets, dim=0)
 
-    def nn_logit_samples(self, X, num_samples=100):
+    def nn_logit_samples(self, feature, num_samples=100):
         fs = []
 
         for sample in self.laplace_model.sample(num_samples):
@@ -167,30 +171,30 @@ class LaplaceWrapper(PosteriorWrapper):
                 sample, self.laplace_model.model.last_layer.parameters()
             )
             fs.append(
-                self.laplace_model.model(X.to(self.laplace_model._device)).detach()
+                self.laplace_model.model.get_classifier()(feature).detach()
             )
 
         vector_to_parameters(
             self.laplace_model.mean, self.laplace_model.model.last_layer.parameters()
         )
-        fs = torch.stack(fs)
+        fs = torch.stack(fs, dim=1)
 
-        return fs.permute(1, 0, 2)
+        return
 
-    def glm_logit_distribution(self, X):
-        Js, f_mu = self.laplace_model.backend.last_layer_jacobians(X)
+    def glm_logit_distribution(self, input):
+        Js, f_mu = self.laplace_model.backend.last_layer_jacobians(input)
         f_var = self.laplace_model.functional_variance(Js)
 
         return f_mu.detach(), f_var.detach()
 
-    def logit_samples(self, x, num_samples=100):
-        """Sample from the posterior logits on input data `x`.
-        Can be used, for example, for Thompson sampling.
+    def logit_samples(self, input, num_samples=100):
+        """Sample from the posterior logits on input data `input`.
 
         Parameters
         ----------
-        x : torch.Tensor
-            input data `(batch_size, input_shape)`
+        input : torch.Tensor
+            input data `(batch_size, input_shape)` if pred_type == 'glm' or
+            pre-logit features `(batch_size, feature_dim)` if pred_type = 'nn'.
 
         pred_type : {'glm', 'nn'}, default='glm'
             type of posterior predictive, linearized GLM predictive or neural
@@ -209,10 +213,10 @@ class LaplaceWrapper(PosteriorWrapper):
             raise ValueError("Only glm and nn supported as prediction types.")
 
         if self.pred_type == "glm":
-            f_mu, f_var = self.glm_logit_distribution(x)
+            f_mu, f_var = self.glm_logit_distribution(input=input)
             dist = MultivariateNormal(f_mu, f_var)
             samples = dist.sample((num_samples,))
 
             return samples.permute(1, 0, 2)
         else:  # 'nn'
-            return self.nn_logit_samples(x, num_samples)
+            return self.nn_logit_samples(feature=input, num_samples=num_samples)
