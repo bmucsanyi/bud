@@ -19,7 +19,6 @@ class ReaderSoft(Reader):
     def __init__(
         self,
         root,
-        is_evaluate_on_all_splits_id=False,
         split="test",
         fold_idx=0,
         **kwargs,
@@ -48,19 +47,10 @@ class ReaderSoft(Reader):
         # Restrict self.samples to val/test
         current_folds = []
         if split == "validation":
-            if is_evaluate_on_all_splits_id:
-                current_folds = [
-                    f"fold{(0 + fold_idx) % 5 + 1}",
-                    f"fold{(1 + fold_idx) % 5 + 1}",
-                    f"fold{(2 + fold_idx) % 5 + 1}",
-                    f"fold{(3 + fold_idx) % 5 + 1}",
-                    f"fold{(4 + fold_idx) % 5 + 1}",
-                ]
-            else:
-                current_folds = [
-                    f"fold{(0 + fold_idx) % 5 + 1}",
-                    f"fold{(1 + fold_idx) % 5 + 1}",
-                ]
+            current_folds = [
+                f"fold{(0 + fold_idx) % 5 + 1}",
+                f"fold{(1 + fold_idx) % 5 + 1}",
+            ]
         elif split == "test":
             current_folds = [
                 f"fold{(2 + fold_idx) % 5 + 1}",

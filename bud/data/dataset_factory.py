@@ -82,7 +82,6 @@ def create_dataset(
     name,
     root,
     label_root=None,
-    is_evaluate_on_all_splits_id=False,
     split="validation",
     search_split=True,
     class_map=None,
@@ -228,7 +227,6 @@ def create_dataset(
             ds = IterableImageDataset(
                 root,
                 reader=name,
-                is_evaluate_on_all_splits_id=is_evaluate_on_all_splits_id,
                 split=split,
                 is_training=is_training,
                 batch_size=batch_size,

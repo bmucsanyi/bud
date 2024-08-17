@@ -200,15 +200,6 @@ group.add_argument(
     ),
 )
 group.add_argument(
-    "--is-evaluate-on-all-splits-id",
-    action="store_true",
-    default=False,
-    help=(
-        "whether to evaluate on all splits in-distribution. Only used in soft datasets "
-        "to reproduce results of the `pytorch-cifar` repo (default: False)",
-    ),
-)
-group.add_argument(
     "--train-subset",
     type=float,
     default=1.0,
@@ -2195,7 +2186,6 @@ def create_datasets(args, num_aug_splits):
         name=args.dataset_id,
         root=args.data_dir_id,
         label_root=args.soft_imagenet_label_dir,
-        is_evaluate_on_all_splits_id=args.is_evaluate_on_all_splits_id,
         split=args.val_split,
         download=args.dataset_download,
         class_map=args.class_map,
@@ -2207,7 +2197,6 @@ def create_datasets(args, num_aug_splits):
         name=args.dataset_id,
         root=args.data_dir_id,
         label_root=args.soft_imagenet_label_dir,
-        is_evaluate_on_all_splits_id=args.is_evaluate_on_all_splits_id,
         split=args.val_split,
         download=args.dataset_download,
         class_map=args.class_map,
