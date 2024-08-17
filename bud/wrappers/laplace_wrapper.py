@@ -192,7 +192,7 @@ class LaplaceWrapper(PosteriorWrapper):
 
         Parameters
         ----------
-        input : torch.Tensor
+        feature : torch.Tensor
             pre-logit features `(batch_size, feature_dim)`.
 
         pred_type : {'glm', 'nn'}, default='glm'
@@ -245,7 +245,7 @@ class LaplaceWrapper(PosteriorWrapper):
 
         # Calculate Jacobians using the feature vector 'feature'
         identity = (
-            torch.eye(num_classes, device=input.device)
+            torch.eye(num_classes, device=feature.device)
             .unsqueeze(0)
             .tile(batch_size, 1, 1)
         )
