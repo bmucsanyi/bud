@@ -71,8 +71,8 @@ class LaplaceWrapper(PosteriorWrapper):
         if self.training:
             return self.model(input)
         else:
-            feature = self.laplace_model.model.forward_head(
-                self.laplace_model.model.forward_features(input), pre_logits=True
+            feature = self.model.forward_head(
+                self.model.forward_features(input), pre_logits=True
             )
 
             logit = self.logit_samples(
@@ -144,7 +144,7 @@ class LaplaceWrapper(PosteriorWrapper):
 
     @torch.no_grad()
     def validate(self, val_loader):
-        self.laplace_model.model.eval()
+        self.model.eval()
         output_means = []
         targets = []
 
@@ -152,8 +152,8 @@ class LaplaceWrapper(PosteriorWrapper):
             input = input.to(self.laplace_model._device)
             target = target.to(self.laplace_model._device)
 
-            feature = self.laplace_model.model.forward_head(
-                self.laplace_model.model.forward_features(input), pre_logits=True
+            feature = self.model.forward_head(
+                self.model.forward_features(input), pre_logits=True
             )
 
             out = self.logit_samples(
@@ -170,15 +170,13 @@ class LaplaceWrapper(PosteriorWrapper):
     def nn_logit_samples(self, feature, num_samples=100):
         fs = []
 
-        for sample in self.laplace_model.sample(num_samples):
-            vector_to_parameters(
-                sample, self.laplace_model.model.last_layer.parameters()
-            )
-            fs.append(self.laplace_model.model.get_classifier()(feature).detach())
+        classifier = self.model.get_classifier()
 
-        vector_to_parameters(
-            self.laplace_model.mean, self.laplace_model.model.last_layer.parameters()
-        )
+        for sample in self.laplace_model.sample(num_samples):
+            vector_to_parameters(sample, classifier.parameters())
+            fs.append(classifier(feature).detach())
+
+        vector_to_parameters(self.laplace_model.mean, classifier.parameters())
         fs = torch.stack(fs, dim=1)
 
         return
@@ -238,7 +236,9 @@ class LaplaceWrapper(PosteriorWrapper):
         logit : torch.Tensor
             output function `(batch_size, num_classes)`
         """
-        logit = self.laplace_model.model.get_classifier()(feature)
+        classifier = self.model.get_classifier()
+
+        logit = classifier(feature)
 
         batch_size = feature.shape[0]
         num_classes = logit.shape[-1]
@@ -254,7 +254,7 @@ class LaplaceWrapper(PosteriorWrapper):
             batch_size, num_classes, -1
         )
 
-        if self.laplace_model.model.last_layer.bias is not None:
+        if classifier.bias is not None:
             Js = torch.cat([Js, identity], dim=2)
 
         return Js.detach(), logit.detach()
