@@ -100,9 +100,7 @@ class HetClassNNWrapper(PosteriorWrapper):
         pre_logits = self.model.forward_head(
             self.model.forward_features(inputs), pre_logits=True
         )  # [B, C]
-        logits = self.model.get_classifier()(
-            pre_logits
-        )  # [B, C]
+        logits = self.model.get_classifier()(pre_logits)  # [B, C]
         variances = self.log_var(pre_logits).exp()  # [B, C]
         stds = variances.sqrt()  # [B, C]
 
