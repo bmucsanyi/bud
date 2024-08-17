@@ -71,12 +71,12 @@ class LaplaceWrapper(PosteriorWrapper):
         if self.training:
             return self.model(input)
         else:
-            feature = self.model.forward_head(
-                self.model.forward_features(input), pre_logits=True
+            feature = self.laplace_model.model.forward_head(
+                self.laplace_model.model.forward_features(input), pre_logits=True
             )
 
             logit = self.logit_samples(
-                input=input if self.pred_type == "glm" else feature,
+                feature=feature,
                 num_samples=self.num_mc_samples,
             )  # [B, S, C]
 
@@ -152,8 +152,12 @@ class LaplaceWrapper(PosteriorWrapper):
             input = input.to(self.laplace_model._device)
             target = target.to(self.laplace_model._device)
 
+            feature = self.laplace_model.model.forward_head(
+                self.laplace_model.model.forward_features(input), pre_logits=True
+            )
+
             out = self.logit_samples(
-                input=input,
+                feature=feature,
                 num_samples=self.num_mc_samples_cv,
             )  # [B, S, C]
             out = F.softmax(out, dim=-1).mean(dim=1)  # [B, C]
@@ -170,9 +174,7 @@ class LaplaceWrapper(PosteriorWrapper):
             vector_to_parameters(
                 sample, self.laplace_model.model.last_layer.parameters()
             )
-            fs.append(
-                self.laplace_model.model.get_classifier()(feature).detach()
-            )
+            fs.append(self.laplace_model.model.get_classifier()(feature).detach())
 
         vector_to_parameters(
             self.laplace_model.mean, self.laplace_model.model.last_layer.parameters()
@@ -181,20 +183,19 @@ class LaplaceWrapper(PosteriorWrapper):
 
         return
 
-    def glm_logit_distribution(self, input):
-        Js, f_mu = self.laplace_model.backend.last_layer_jacobians(input)
+    def glm_logit_distribution(self, feature):
+        Js, f_mu = self.last_layer_jacobians(feature)
         f_var = self.laplace_model.functional_variance(Js)
 
         return f_mu.detach(), f_var.detach()
 
-    def logit_samples(self, input, num_samples=100):
-        """Sample from the posterior logits on input data `input`.
+    def logit_samples(self, feature, num_samples=100):
+        """Sample from the posterior logits on `feature`.
 
         Parameters
         ----------
         input : torch.Tensor
-            input data `(batch_size, input_shape)` if pred_type == 'glm' or
-            pre-logit features `(batch_size, feature_dim)` if pred_type = 'nn'.
+            pre-logit features `(batch_size, feature_dim)`.
 
         pred_type : {'glm', 'nn'}, default='glm'
             type of posterior predictive, linearized GLM predictive or neural
@@ -213,10 +214,47 @@ class LaplaceWrapper(PosteriorWrapper):
             raise ValueError("Only glm and nn supported as prediction types.")
 
         if self.pred_type == "glm":
-            f_mu, f_var = self.glm_logit_distribution(input=input)
+            f_mu, f_var = self.glm_logit_distribution(feature=feature)
             dist = MultivariateNormal(f_mu, f_var)
             samples = dist.sample((num_samples,))
 
             return samples.permute(1, 0, 2)
         else:  # 'nn'
-            return self.nn_logit_samples(feature=input, num_samples=num_samples)
+            return self.nn_logit_samples(feature=feature, num_samples=num_samples)
+
+    def last_layer_jacobians(self, feature):
+        r"""Compute Jacobians
+        \(\nabla_{\theta_\textrm{last}} f(x;\theta_\textrm{last})\)
+        only at current last-layer parameter \(\theta_{\textrm{last}}\).
+
+        Parameters
+        ----------
+        feature : torch.Tensor
+
+        Returns
+        -------
+        Js : torch.Tensor
+            Jacobians `(batch_size, last-layer-parameters, num_classes)`
+        logit : torch.Tensor
+            output function `(batch_size, num_classes)`
+        """
+        logit = self.laplace_model.model.get_classifier()(feature)
+
+        batch_size = feature.shape[0]
+        num_classes = logit.shape[-1]
+
+        # Calculate Jacobians using the feature vector 'feature'
+        identity = (
+            torch.eye(num_classes, device=input.device)
+            .unsqueeze(0)
+            .tile(batch_size, 1, 1)
+        )
+        # Jacobians are batch x output x params
+        Js = torch.einsum("kp,kij->kijp", feature, identity).reshape(
+            batch_size, num_classes, -1
+        )
+
+        if self.laplace_model.model.last_layer.bias is not None:
+            Js = torch.cat([Js, identity], dim=2)
+
+        return Js.detach(), logit.detach()
