@@ -179,7 +179,7 @@ class LaplaceWrapper(PosteriorWrapper):
         vector_to_parameters(self.laplace_model.mean, classifier.parameters())
         fs = torch.stack(fs, dim=1)
 
-        return
+        return fs
 
     def glm_logit_distribution(self, feature):
         Js, f_mu = self.last_layer_jacobians(feature)
