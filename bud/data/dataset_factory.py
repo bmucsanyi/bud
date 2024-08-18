@@ -58,7 +58,7 @@ _EVAL_SYNONYM = dict(val=None, valid=None, validation=None, eval=None, evaluatio
 
 
 def _search_split(root, split):
-    # look for sub-folder with name of split in root and use that if it exists
+    # Look for sub-folder with name of split in root and use that if it exists
     split_name = split.split("[")[0]
     try_root = os.path.join(root, split_name)
     if os.path.exists(try_root):
@@ -180,7 +180,7 @@ def create_dataset(
             # In case torchvision ImageFolder is preferred over timm ImageDataset for
             # some reason
             if search_split and os.path.isdir(root):
-                # look for split specific sub-folder in root
+                # Look for split specific sub-folder in root
                 root = _search_split(root, split)
             ds = ImageFolder(root, **kwargs)
         else:
@@ -274,8 +274,8 @@ class Subset(Dataset):
         return self.dataset[self.indices[idx]]
 
     def __getitems__(self, indices):
-        # add batched sampling support when parent dataset supports it.
-        # see torch.utils.data._utils.fetch._MapDatasetFetcher
+        # Add batched sampling support when parent dataset supports it.
+        # See torch.utils.data._utils.fetch._MapDatasetFetcher
         if callable(getattr(self.dataset, "__getitems__", None)):
             return self.dataset.__getitems__([self.indices[idx] for idx in indices])
         else:
