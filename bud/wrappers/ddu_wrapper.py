@@ -206,7 +206,7 @@ class DDUWrapper(TemperatureWrapper):
         )  # [C, D, D]
 
         for jitter_eps in JITTERS:
-            logger.info("Trying", jitter_eps, "...")
+            logger.info(f"Trying {jitter_eps}...")
             try:
                 jitter = jitter_eps * torch.eye(
                     classwise_cov_features.shape[1]
@@ -229,6 +229,6 @@ class DDUWrapper(TemperatureWrapper):
                 continue
             break
 
-        logger.info("Used jitter:", jitter_eps)
+        logger.info(f"Used jitter: {jitter_eps}")
 
         assert self.gmm is not None
