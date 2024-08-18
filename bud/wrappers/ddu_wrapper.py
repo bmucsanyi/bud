@@ -104,35 +104,36 @@ class DDUWrapper(TemperatureWrapper):
             return features
 
         logits = self.get_classifier()(features)
-        logits = logits / self.temperature
 
         if self.training:
             return logits
+
+        logits /= self.temperature
+
+        if self.gmm_loc is None:
+            warnings.warn("GMM has not been fit yet; giving constant EU estimates.")
+
+            gmm_log_density = torch.ones((x.shape[0],))
         else:
-            if self.gmm_loc is None:
-                warnings.warn("GMM has not been fit yet; giving constant EU estimates.")
-
-                gmm_log_density = torch.ones((x.shape[0],))
-            else:
-                if self.gmm is None:
-                    self.gmm = torch.distributions.MultivariateNormal(
-                        loc=self.gmm_loc,
-                        covariance_matrix=self.gmm_covariance_matrix,
-                    )
-
-                gmm_log_densities = self.gmm.log_prob(
-                    features[:, None, :].cpu()
-                ).cuda()  # [B, C]
-                gmm_weighted_log_densities = (
-                    gmm_log_densities  # + self.classwise_probs.log()
+            if self.gmm is None:
+                self.gmm = torch.distributions.MultivariateNormal(
+                    loc=self.gmm_loc,
+                    covariance_matrix=self.gmm_covariance_matrix,
                 )
-                gmm_log_density = gmm_weighted_log_densities.logsumexp(dim=1)
 
-            return {
-                "logit": logits,
-                "feature": features,
-                "gmm_neg_log_density": -gmm_log_density,
-            }
+            gmm_log_densities = self.gmm.log_prob(
+                features[:, None, :].cpu()
+            ).cuda()  # [B, C]
+            gmm_weighted_log_densities = (
+                gmm_log_densities  # + self.classwise_probs.log()
+            )
+            gmm_log_density = gmm_weighted_log_densities.logsumexp(dim=1)
+
+        return {
+            "logit": logits,
+            "feature": features,
+            "gmm_neg_log_density": -gmm_log_density,
+        }
 
     def fit_gmm(self, train_loader, max_num_training_samples):
         features, labels = self._get_features(
@@ -207,6 +208,7 @@ class DDUWrapper(TemperatureWrapper):
 
         for jitter_eps in JITTERS:
             logger.info(f"Trying {jitter_eps}...")
+
             try:
                 jitter = jitter_eps * torch.eye(
                     classwise_cov_features.shape[1]
