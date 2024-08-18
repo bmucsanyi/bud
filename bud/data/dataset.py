@@ -155,7 +155,7 @@ class IterableImageDataset(data.IterableDataset):
         self,
         num_workers: Optional[int] = None,
     ):
-        # TFDS and WDS readers need # workers for correct #samples estimate before loader
+        # TFDS and WDS readers need #workers for correct #samples estimate before loader
         # processes created
         if hasattr(self.reader, "set_loader_cfg"):
             self.reader.set_loader_cfg(num_workers=num_workers)
@@ -198,11 +198,11 @@ class AugMixDataset(torch.utils.data.Dataset):
         return x if self.normalize is None else self.normalize(x)
 
     def __getitem__(self, i):
-        x, y = self.dataset[i]  # all splits share the same dataset base transform
+        x, y = self.dataset[i]  # All splits share the same dataset base transform
         x_list = [
             self._normalize(x)
-        ]  # first split only normalizes (this is the 'clean' split)
-        # run the full augmentation on the remaining splits
+        ]  # First split only normalizes (this is the 'clean' split)
+        # Run the full augmentation on the remaining splits
         for _ in range(self.num_splits - 1):
             x_list.append(self._normalize(self.augmentation(x)))
         return tuple(x_list), y
@@ -286,7 +286,7 @@ class SoftImageNet(ImageNet):
             else:
                 new_soft_labels[key] = np.zeros(num_labels)
 
-        # merge soft and hard labels
+        # Merge soft and hard labels
         unique_img_filepath = list(new_soft_labels.keys())
         filepath_to_imgid = dict(
             zip(unique_img_filepath, list(np.arange(0, len(unique_img_filepath))))
@@ -299,8 +299,9 @@ class SoftImageNet(ImageNet):
                 final_soft_label = new_soft_labels[img]
             soft_labels_array[idx, :] = final_soft_label
 
-        # Note that 750 of the 50000 images in soft_labels_array will still not have a label at all.
-        # These are ones where the old imagenet label was false and also the raters could not determine any new one.
-        # We hand 0 matrices out for them. They should be ignored in computing the metrics
+        # Note that 750 of the 50000 images in soft_labels_array will still not have a
+        # label at all. These are ones where the old imagenet label was false and also
+        # the raters could not determine any new one. We hand 0 matrices out for them.
+        # They should be ignored in computing the metrics
 
         return soft_labels_array, filepath_to_imgid
