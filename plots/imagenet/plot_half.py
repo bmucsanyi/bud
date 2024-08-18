@@ -24,8 +24,8 @@ from tueplots import bundles
 from matplotlib.ticker import MultipleLocator
 
 config = bundles.neurips2024()
-# config["figure.figsize"] = (2.64, 0.9)
-config["figure.figsize"] = (4, 1.37)
+config["figure.figsize"] = (2.64, 0.9)
+# config["figure.figsize"] = (4, 1.37)
 plt.rcParams.update(config)
 plt.rcParams["text.latex.preamble"] += r"\usepackage{amsmath} \usepackage{amsfonts}"
 
@@ -145,7 +145,7 @@ def plot_and_save_aggregated(
     _, ax = plt.subplots()
     ax.grid(axis="y", which="both", zorder=1, linewidth=0.5)
     # Set major ticks at every 0.1 and minor ticks at every 0.05
-    multiplier = 2 if ("Rank" in suffix or "rAULC" in suffix) else 1
+    multiplier = 2 if ("Corr" in suffix or "rAULC" in suffix) else 1
     ax.yaxis.set_major_locator(MultipleLocator(0.1 * multiplier))
     ax.yaxis.set_minor_locator(MultipleLocator(0.05 * multiplier))
     # ax.yaxis.set_major_locator(MultipleLocator(0.5))
@@ -168,6 +168,9 @@ def plot_and_save_aggregated(
     )
     ax.spines[["right", "top"]].set_visible(False)
     ax.set_ylabel(suffix + (r" $\uparrow$" if not decreasing else r" $\downarrow$"))
+
+    # for label, best_value, error_bar in zip(labels, best_values, error_bars):
+    #     print(label, best_value, error_bar)
 
     ax.set(xticklabels=[])
     ax.tick_params(bottom=False)
@@ -292,6 +295,8 @@ def main(args):
                         ):
                             continue
 
+                        # print(stripped_key, run.summary[key])
+
                         if stripped_key not in metric:
                             metric[stripped_key] = [run.summary[key]]
                         else:
@@ -331,6 +336,8 @@ def main(args):
             else:
                 aggregated_key = None
             # aggregated_key = "jensen_shannon_divergences"
+            # aggregated_key = "expected_entropies"
+            # aggregated_key = "expected_variances_of_logits"
 
             if aggregated_key is None:
                 operator = min if args.decreasing else max
