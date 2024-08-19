@@ -14,6 +14,7 @@ import os
 import time
 import warnings
 from numbers import Number
+import logging
 
 import torch
 import torch.nn.functional as F
@@ -65,6 +66,7 @@ except AttributeError:
 
 has_compile = hasattr(torch, "compile")
 
+logger = logging.getLogger(__name__)
 
 def evaluate_bulk(
     model,
@@ -83,6 +85,7 @@ def evaluate_bulk(
     for name, loaders_subset in loaders.items():
         metrics[name] = {}
         for ood_transform_type, loader in loaders_subset.items():
+            logger.info(f"Evaluating {name} - {ood_transform_type}...")
             metrics[name][ood_transform_type] = evaluate(
                 model=model,
                 loader=loader,
@@ -96,6 +99,7 @@ def evaluate_bulk(
                 is_test=is_test,
                 args=args,
             )
+            logger.info(f"Finished evaluating {name} - {ood_transform_type}.")
         add_average(metrics[name])
 
     # Summarize results
