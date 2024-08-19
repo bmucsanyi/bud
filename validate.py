@@ -1829,14 +1829,10 @@ def evaluate_on_correlation_of_decompositions(
         )
 
         metrics[f"{key_prefix}rank_correlation_bregman_au_hat_pu_hat"] = float(
-            spearmanr(expected_entropies, expected_entropies_plus_expected_divergences)[
-                0
-            ]
+            spearmanr(expected_entropies, expected_entropies_plus_expected_divergences)
         )
         metrics[f"{key_prefix}correlation_bregman_au_hat_pu_hat"] = float(
-            pearsonr(expected_entropies, expected_entropies_plus_expected_divergences)[
-                0
-            ]
+            pearsonr(expected_entropies, expected_entropies_plus_expected_divergences)
         )
 
     if not is_evaluate_gt or isinstance(model, MCInfoNCEWrapper):
