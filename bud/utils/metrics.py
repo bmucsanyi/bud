@@ -266,7 +266,9 @@ def coverage_for_accuracy(
 
     cumsum_correctnesses = torch.cumsum(correctnesses, dim=0)
     num_samples = cumsum_correctnesses.shape[0]
-    cummean_correctnesses = cumsum_correctnesses / torch.arange(1, num_samples + 1)
+    cummean_correctnesses = cumsum_correctnesses / torch.arange(
+        1, num_samples + 1, device=uncertainties.device
+    )
     coverage_for_accuracy = torch.argmax((cummean_correctnesses < accuracy).float())
 
     # To ignore statistical noise, start measuring at an index greater than 0
