@@ -13,6 +13,7 @@ from scipy.ndimage.interpolation import map_coordinates
 from skimage.filters import gaussian
 from wand.api import library as wandlibrary
 from wand.image import Image as WandImage
+from numba import njit
 
 # Distortion helpers
 
@@ -123,6 +124,21 @@ def clipped_zoom(img, zoom_factor):
     return img[trim_top : trim_top + h, trim_top : trim_top + h]
 
 
+# Numba nopython compilation to shuffle_pixles
+# https://github.com/bethgelab/imagecorruptions/blob/master/imagecorruptions/corruptions.py
+@njit()
+def shuffle_pixels_njit_frosted_glass_blur(d0, d1, x, c):
+    # locally shuffle pixels
+    for _ in range(c[2]):
+        for h in range(d0 - c[1], c[1], -1):
+            for w in range(d1 - c[1], c[1], -1):
+                dx, dy = np.random.randint(-c[1], c[1], size=(2,))
+                h_prime, w_prime = h + dy, w + dx
+                # swap
+                x[h, w], x[h_prime, w_prime] = x[h_prime, w_prime], x[h, w]
+    return x
+
+
 # Distortions
 
 
@@ -190,16 +206,10 @@ def frosted_glass_blur(x, severity=1, rng=None):
     # sigma, max_delta, iterations
     c = [(0.7, 1, 2), (0.9, 2, 1), (1, 2, 3), (1.1, 3, 2), (1.5, 4, 2)][severity - 1]
 
-    x = np.uint8(gaussian(np.array(x) / 255.0, sigma=c[0], channel_axis=2) * 255)
+    x_array = np.array(x)
+    x = np.uint8(gaussian(x_array / 255.0, sigma=c[0], channel_axis=2) * 255)
 
-    # locally shuffle pixels
-    for _ in range(c[2]):
-        for h in range(224 - c[1], c[1], -1):
-            for w in range(224 - c[1], c[1], -1):
-                dx, dy = rng.integers(-c[1], c[1], size=(2,))
-                h_prime, w_prime = h + dy, w + dx
-                # swap
-                x[h, w], x[h_prime, w_prime] = x[h_prime, w_prime], x[h, w]
+    x = shuffle_pixels_njit_frosted_glass_blur(x_array.shape[0], x_array.shape[1], x, c)
 
     x = np.clip(gaussian(x / 255.0, sigma=c[0], channel_axis=2), 0, 1) * 255
     return PILImage.fromarray(np.uint8(x))
