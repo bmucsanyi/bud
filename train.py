@@ -168,22 +168,6 @@ group.add_argument(
     ),
 )
 group.add_argument(
-    "--data-dir-zero-shot",
-    metavar="DIR",
-    default=None,
-    help=("path to zero-shot datasets (root dir) (default: None, uses --data-dir)"),
-)
-group.add_argument(
-    "--dataset-zero-shot",
-    default=[],
-    type=string_list,
-    help=(
-        'list of zero-shot datasets type + name ("<type>/<name>"); '
-        "to skip zero-shot evaluation, just provide the same as for --dataset-eval; ",
-        "(default: [])",
-    ),
-)
-group.add_argument(
     "--ood-transforms-eval",
     default=[],
     type=string_list,
@@ -290,12 +274,6 @@ group.add_argument(
     type=int_list,
     default=[1, 2, 3, 4, 5],
     help="OOD severities to evaluate (default: [1, 2, 3, 4, 5])",
-)
-group.add_argument(
-    "--test-split-zero-shot",
-    metavar="NAME",
-    default="test",
-    help="dataset test split for zero-shot dataset(s). Overrides test-split (default: test)",
 )
 group.add_argument(
     "--dataset-download",
@@ -1495,9 +1473,6 @@ def _parse_args():
     if args.data_dir_id is None:
         args.data_dir_id = args.data_dir
 
-    if args.data_dir_zero_shot is None:
-        args.data_dir_zero_shot = args.data_dir
-
     # Detect a special code that tells us to use the local node storage.
     SLURM_TUE_PATH = (
         f"/host/scratch_local/{os.environ.get('SLURM_JOB_USER')}-"
@@ -1509,9 +1484,6 @@ def _parse_args():
 
     if args.data_dir_id == "SLURM_TUE":
         args.data_dir_id = SLURM_TUE_PATH
-
-    if args.data_dir_zero_shot == "SLURM_TUE":
-        args.data_dir_zero_shot = SLURM_TUE_PATH
 
     if args.soft_imagenet_label_dir == "SLURM_TUE":
         args.soft_imagenet_label_dir = SLURM_TUE_PATH
@@ -1797,10 +1769,9 @@ def main():
         loader_train,
         loader_id_eval,
         loader_id_eval_hard,
-        loaders_ood_eval,
         loader_id_test,
         loaders_ood_test,
-        loaders_zero_shot_test,
+        mixed_s2_loader_eval,
     ) = create_loaders(
         data_config=data_config,
         args=args,
@@ -2064,7 +2035,7 @@ def main():
                 model=model,
                 loader_train=loader_train,
                 loader_id_eval_hard=loader_id_eval_hard,
-                loader_ood_eval=loaders_ood_eval[f"{args.dataset_id}S2"],
+                mixed_s2_loader_eval=mixed_s2_loader_eval,
                 args=args,
             )
 
@@ -2072,7 +2043,6 @@ def main():
                 model=model,
                 loader_id_test=loader_id_test,
                 loaders_ood_test=loaders_ood_test,
-                loaders_zero_shot_test=loaders_zero_shot_test,
                 device=device,
                 amp_autocast=amp_autocast,
                 output_dir=output_dir,
@@ -2104,7 +2074,6 @@ def evaluate_on_test_sets(
     model,
     loader_id_test,
     loaders_ood_test,
-    loaders_zero_shot_test,
     device,
     amp_autocast,
     output_dir,
@@ -2140,22 +2109,6 @@ def evaluate_on_test_sets(
         is_test=True,
         args=args,
     )
-
-    if len(loaders_zero_shot_test) > 0:
-        best_test_metrics.update(
-            evaluate_bulk(
-                model=model,
-                loaders=loaders_zero_shot_test,
-                device=device,
-                amp_autocast=amp_autocast,
-                key_prefix="zero_shot_test",
-                output_dir=output_dir,
-                is_same_task=False,
-                is_upstream=False,
-                is_test=True,
-                args=args,
-            )
-        )
 
     return best_test_metrics
 
@@ -2212,31 +2165,20 @@ def create_datasets(args, num_aug_splits):
 
     dataset_id_eval_hard.target_transform = hard_target_transform
 
-    dataset_locations_ood_eval = {}
-    for severity in args.severities:
-        dataset_locations_ood_eval[f"{args.dataset_id}S{severity}"] = args.data_dir_id
+    mixed_s2_dataset_eval = create_dataset(
+        name=args.dataset_id,
+        root=args.data_dir_id,
+        label_root=args.soft_imagenet_label_dir,
+        split=args.test_split,
+        download=args.dataset_download,
+        class_map=args.class_map,
+        batch_size=args.batch_size,
+        is_training=False,
+    )
 
     dataset_locations_ood_test = {}
     for severity in args.severities:
         dataset_locations_ood_test[f"{args.dataset_id}S{severity}"] = args.data_dir_id
-
-    dataset_locations_zero_shot_test = {}
-    for dataset in args.dataset_zero_shot:
-        dataset_locations_zero_shot_test[dataset] = args.data_dir_zero_shot
-
-    datasets_ood_eval = {}
-    for name, location in dataset_locations_ood_eval.items():
-        dataset = create_dataset(
-            name=name[:-2],
-            root=location,
-            label_root=args.soft_imagenet_label_dir,
-            split=args.val_split,
-            download=args.dataset_download,
-            class_map=args.class_map,
-            batch_size=args.batch_size,
-            is_training=False,
-        )
-        datasets_ood_eval[name] = dataset
 
     dataset_id_test = create_dataset(
         name=args.dataset_id,
@@ -2263,20 +2205,6 @@ def create_datasets(args, num_aug_splits):
         )
         datasets_ood_test[name] = dataset
 
-    datasets_zero_shot_test = {}
-    for name, location in dataset_locations_zero_shot_test.items():
-        dataset = create_dataset(
-            name=name,
-            root=location,
-            label_root=args.soft_imagenet_label_dir,
-            split=args.test_split_zero_shot,
-            download=args.dataset_download,
-            class_map=args.class_map,
-            batch_size=args.batch_size,
-            is_training=False,
-        )
-        datasets_zero_shot_test[name] = dataset
-
     # Wrap dataset in AugMix helper
     if num_aug_splits > 1:
         dataset_train = AugMixDataset(dataset_train, num_splits=num_aug_splits)
@@ -2285,10 +2213,9 @@ def create_datasets(args, num_aug_splits):
         dataset_train,
         dataset_id_eval,
         dataset_id_eval_hard,
-        datasets_ood_eval,
         dataset_id_test,
         datasets_ood_test,
-        datasets_zero_shot_test,
+        mixed_s2_dataset_eval,
     )
 
 
@@ -2297,10 +2224,9 @@ def create_loaders(data_config, args, device, num_aug_splits, collate_fn):
         dataset_train,
         dataset_id_eval,
         dataset_id_eval_hard,
-        datasets_ood_eval,
         dataset_id_test,
         datasets_ood_test,
-        datasets_zero_shot_test,
+        mixed_s2_dataset_eval,
     ) = create_datasets(args, num_aug_splits)
 
     # Create data loaders w/ augmentation pipeline
@@ -2332,8 +2258,8 @@ def create_loaders(data_config, args, device, num_aug_splits, collate_fn):
         num_aug_repeats=args.aug_repeats,
         num_aug_splits=num_aug_splits,
         interpolation=train_interpolation,
-        mean=data_config["mean"],  # from --mean
-        std=data_config["std"],  # from --std
+        mean=data_config["mean"],  # From --mean
+        std=data_config["std"],  # From --std
         num_workers=args.workers,
         distributed=args.distributed,
         collate_fn=collate_fn,
@@ -2380,26 +2306,24 @@ def create_loaders(data_config, args, device, num_aug_splits, collate_fn):
         device=device,
     )
 
-    loaders_ood_eval = {}
-    for name, dataset in datasets_ood_eval.items():
-        loaders_ood_eval[name] = create_loader(
-            dataset,
-            dataset_name=name,
-            input_size=data_config["input_size"],
-            batch_size=args.validation_batch_size or args.batch_size,
-            is_training=False,
-            use_prefetcher=args.prefetcher,
-            interpolation=data_config["interpolation"],
-            mean=data_config["mean"],
-            std=data_config["std"],
-            num_workers=num_eval_workers,
-            distributed=args.distributed,
-            crop_pct=data_config["crop_pct"],
-            pin_memory=args.pin_mem,
-            device=device,
-            ood_transforms=args.ood_transforms_eval,
-            severity=int(name[-1]),
-        )
+    mixed_s2_loader_eval = create_loader(
+        mixed_s2_dataset_eval,
+        dataset_name=f"{args.dataset_id}S2",
+        input_size=data_config["input_size"],
+        batch_size=args.validation_batch_size or args.batch_size,
+        is_training=False,
+        use_prefetcher=args.prefetcher,
+        interpolation=data_config["interpolation"],
+        mean=data_config["mean"],
+        std=data_config["std"],
+        num_workers=num_eval_workers,
+        distributed=args.distributed,
+        crop_pct=data_config["crop_pct"],
+        pin_memory=args.pin_mem,
+        device=device,
+        ood_transform_type=args.ood_transforms_eval,
+        severity=2,
+    )
 
     loader_id_test = create_loader(
         dataset_id_test,
@@ -2420,52 +2344,35 @@ def create_loaders(data_config, args, device, num_aug_splits, collate_fn):
 
     loaders_ood_test = {}
     for name, dataset in datasets_ood_test.items():
-        loaders_ood_test[name] = create_loader(
-            dataset,
-            dataset_name=name,
-            input_size=data_config["input_size"],
-            batch_size=args.validation_batch_size or args.batch_size,
-            is_training=False,
-            use_prefetcher=args.prefetcher,
-            interpolation=data_config["interpolation"],
-            mean=data_config["mean"],
-            std=data_config["std"],
-            num_workers=num_eval_workers,
-            distributed=args.distributed,
-            crop_pct=data_config["crop_pct"],
-            pin_memory=args.pin_mem,
-            device=device,
-            ood_transforms=args.ood_transforms_test,
-            severity=int(name[-1]),
-        )
+        loaders_ood_test[name] = {}
 
-    loaders_zero_shot_test = {}
-    for name, dataset in datasets_zero_shot_test.items():
-        loaders_zero_shot_test[name] = create_loader(
-            dataset,
-            dataset_name=name,
-            input_size=data_config["input_size"],
-            batch_size=args.validation_batch_size or args.batch_size,
-            is_training=False,
-            use_prefetcher=args.prefetcher,
-            interpolation=data_config["interpolation"],
-            mean=data_config["mean"],
-            std=data_config["std"],
-            num_workers=num_eval_workers,
-            distributed=args.distributed,
-            crop_pct=data_config["crop_pct"],
-            pin_memory=args.pin_mem,
-            device=device,
-        )
+        for ood_transform_type in args.ood_transforms_test:
+            loaders_ood_test[name][ood_transform_type] = create_loader(
+                dataset,
+                dataset_name=name,
+                input_size=data_config["input_size"],
+                batch_size=args.validation_batch_size or args.batch_size,
+                is_training=False,
+                use_prefetcher=args.prefetcher,
+                interpolation=data_config["interpolation"],
+                mean=data_config["mean"],
+                std=data_config["std"],
+                num_workers=num_eval_workers,
+                distributed=args.distributed,
+                crop_pct=data_config["crop_pct"],
+                pin_memory=args.pin_mem,
+                device=device,
+                ood_transform_type=ood_transform_type,
+                severity=int(name[-1]),
+            )
 
     return (
         loader_train,
         loader_id_eval,
         loader_id_eval_hard,
-        loaders_ood_eval,
         loader_id_test,
         loaders_ood_test,
-        loaders_zero_shot_test,
+        mixed_s2_loader_eval,
     )
 
 
@@ -2644,7 +2551,7 @@ def train_one_epoch(
 
 
 def update_post_hoc_method(
-    model, loader_train, loader_id_eval_hard, loader_ood_eval, args
+    model, loader_train, loader_id_eval_hard, mixed_s2_loader_eval, args
 ):
     if isinstance(model, LaplaceWrapper):
         assert (
@@ -2653,13 +2560,13 @@ def update_post_hoc_method(
         model.perform_laplace_approximation(loader_train, loader_id_eval_hard)
     elif isinstance(model, MahalanobisWrapper):
         assert (
-            loader_id_eval_hard is not None and loader_ood_eval is not None
+            loader_id_eval_hard is not None and mixed_s2_loader_eval is not None
         ), "For the Mahalanobis method, the ID and OOD eval loaders have to be specified."
         torch.set_grad_enabled(mode=False)
         model.train_logistic_regressor(
             loader_train,
             loader_id_eval_hard,
-            loader_ood_eval,
+            mixed_s2_loader_eval,
             args.max_num_covariance_samples,
             args.max_num_id_ood_train_samples,
         )
