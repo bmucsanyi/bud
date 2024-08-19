@@ -80,28 +80,31 @@ def evaluate_bulk(
 ):
     metrics = {}
 
-    for name, loader in loaders.items():
-        metrics[name] = evaluate(
-            model=model,
-            loader=loader,
-            loader_name=name,
-            device=device,
-            amp_autocast=amp_autocast,
-            key_prefix="",
-            output_dir=output_dir,
-            is_same_task=is_same_task,
-            is_upstream=is_upstream,
-            is_test=is_test,
-            args=args,
-        )
+    for name, loaders_subset in loaders.items():
+        metrics[name] = {}
+        for ood_transform_type, loader in loaders_subset.items():
+            metrics[name][ood_transform_type] = evaluate(
+                model=model,
+                loader=loader,
+                loader_name=f"{name}_{ood_transform_type}",
+                device=device,
+                amp_autocast=amp_autocast,
+                key_prefix="",
+                output_dir=output_dir,
+                is_same_task=is_same_task,
+                is_upstream=is_upstream,
+                is_test=is_test,
+                args=args,
+            )
+        add_average(metrics[name])
 
     # Summarize results
-    flattened_metrics = add_average_and_flatten(results=metrics, key_prefix=key_prefix)
+    flattened_metrics = flatten(results=metrics, key_prefix=key_prefix)
 
     return flattened_metrics
 
 
-def add_average_and_flatten(results, key_prefix):
+def add_average(results):
     # Summarize results
     avg_results = {}
     first_loader_results = results[list(results.keys())[0]]
@@ -113,11 +116,16 @@ def add_average_and_flatten(results, key_prefix):
             avg_results[key] = result_vector.mean().item()
     results["avg"] = avg_results
 
+
+def flatten(results, key_prefix):
     # Flatten output
     flattened_results = {}
-    for name, dict in results.items():
-        for key, value in dict.items():
-            flattened_results[f"{key_prefix}_{name}_{key}"] = value
+    for name, results_subset in results.items():
+        for ood_transform_type, results_subsubset in results_subset.items():
+            for key, value in results_subsubset.items():
+                flattened_results[
+                    f"{key_prefix}_{name}_{ood_transform_type}_{key}"
+                ] = value
 
     return flattened_results
 
