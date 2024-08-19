@@ -232,14 +232,6 @@ group.add_argument(
     help="whether to evaluate ground truth uncertainty statistics (default: False)",
 )
 group.add_argument(
-    "--num-repetitions",
-    default=20,
-    type=int,
-    help="number of repetitions when converting soft-label correctness to hard-label "
-    "correctness. Example: when the soft-label correctness is 0.8 and "
-    "--num-repetitions=10, we get 8 correct and 2 incorrect predictions (default: 20)",
-)
-group.add_argument(
     "--train-split",
     metavar="NAME",
     default="train",
@@ -1967,7 +1959,6 @@ def main():
                 amp_autocast=amp_autocast,
                 key_prefix="id_eval",
                 output_dir=output_dir,
-                is_same_task=True,
                 is_upstream=True,
                 is_test=False,
                 args=args,
@@ -2088,7 +2079,6 @@ def evaluate_on_test_sets(
         amp_autocast=amp_autocast,
         key_prefix="id_test",
         output_dir=output_dir,
-        is_same_task=True,
         is_upstream=True,
         is_test=True,
         args=args,
@@ -2104,7 +2094,6 @@ def evaluate_on_test_sets(
         amp_autocast=amp_autocast,
         key_prefix="ood_test",
         output_dir=output_dir,
-        is_same_task=True,
         is_upstream=False,
         is_test=True,
         args=args,
