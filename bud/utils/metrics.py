@@ -3,11 +3,8 @@
 Hacked together by / Copyright 2020 Ross Wightman
                            and 2024 Bálint Mucsányi
 """
-
-import faiss
 import torch
 import torch.nn.functional as F
-from sklearn.preprocessing import normalize
 from torch import Tensor
 
 
@@ -189,7 +186,7 @@ def area_under_lift_curve(
         sorted_idx = torch.argsort(uncertainties)  # Most certain indices first
 
     sorted_correctnesses = correctnesses[sorted_idx]
-    lift = torch.zeros((batch_size,), dtype=torch.float32)
+    lift = torch.zeros((batch_size,), dtype=torch.float32, device=uncertainties.device)
     accuracy = correctnesses.mean()
     lift[0] = sorted_correctnesses[0] / accuracy
 
@@ -233,7 +230,7 @@ def area_under_risk_coverage_curve(
     sorted_indices = torch.argsort(uncertainties)
     correctnesses = correctnesses[sorted_indices]
     total_samples = uncertainties.shape[0]
-    aurc = torch.tensor(0.0)
+    aurc = torch.tensor(0.0, device=uncertainties.device)
     incorrect_num = 0
 
     for i in range(total_samples):
