@@ -12,15 +12,12 @@ Hacked together by / Copyright 2020 Ross Wightman (https://github.com/rwightman)
 
 import os
 import time
-import warnings
 from numbers import Number
 import logging
 
 import torch
 import torch.nn.functional as F
 import torch.nn.parallel
-from scipy.stats import ConstantInputWarning, pearsonr, spearmanr
-from sklearn.metrics import roc_auc_score as auroc
 
 from bud.utils import (
     AverageMeter,
@@ -31,13 +28,15 @@ from bud.utils import (
     kl_divergence,
     multiclass_brier,
     multiclass_log_probability,
-    recall_at_one,
     dempster_shafer_metric,
     area_under_lift_curve,
     relative_area_under_lift_curve,
     area_under_risk_coverage_curve,
     excess_area_under_risk_coverage_curve,
     coverage_for_accuracy,
+    pearsonr,
+    spearmanr,
+    auroc
 )
 from bud.wrappers import (
     BaseCorrectnessPredictionWrapper,
@@ -51,11 +50,6 @@ from bud.wrappers import (
     DirichletWrapper,
     HetClassNNWrapper,
 )
-
-# Ignore constant input warning for correlation coefficients.
-# This is expected to happen for all models without multiple
-# sampled logits.
-warnings.filterwarnings("ignore", category=ConstantInputWarning)
 
 has_native_amp = False
 try:
@@ -75,7 +69,6 @@ def evaluate_bulk(
     amp_autocast,
     key_prefix,
     output_dir,
-    is_same_task,
     is_upstream,
     is_test,
     args,
@@ -96,7 +89,6 @@ def evaluate_bulk(
                 amp_autocast=amp_autocast,
                 key_prefix="",
                 output_dir=output_dir,
-                is_same_task=is_same_task,
                 is_upstream=is_upstream,
                 is_test=is_test,
                 args=args,
@@ -151,17 +143,12 @@ def evaluate(
     amp_autocast,
     key_prefix,
     output_dir,
-    is_same_task,
     is_upstream,
     is_test,
     args,
 ):
     model.eval()
     torch.set_grad_enabled(mode=False)
-
-    assert not (
-        is_upstream and not is_same_task
-    ), "The upstream dataset has the same task by definition"
 
     label_shape = next(iter(loader))[1].shape
     is_soft_labels = len(label_shape) == 2
@@ -174,7 +161,6 @@ def evaluate(
         device=device,
         amp_autocast=amp_autocast,
         is_soft_labels=is_soft_labels,
-        is_same_task=is_same_task,
         args=args,
     )
 
@@ -190,7 +176,6 @@ def evaluate(
             log_probs=log_probs,
             targets=targets,
             metrics=metrics,
-            is_same_task=is_same_task,
             is_soft_labels=is_soft_labels,
             save_prefix=save_prefix,
             output_dir=output_dir,
@@ -206,13 +191,13 @@ def evaluate(
 
     if is_upstream and is_test and output_dir is not None:
         # Save ingredients to disk
-        max_num_indices = len(targets["gt_zero_shot_correctnesses"])
+        max_num_indices = len(targets["gt_hard_labels"])
         num_indices = min(max_num_indices, args.max_num_id_ood_eval_samples // 2)
         path_indices = f"bud/data/{num_indices}_indices_out_of_{max_num_indices}.pt"
         if os.path.exists(path_indices):
             indices = torch.load(path_indices)
         else:
-            indices = torch.randperm(max_num_indices)[:num_indices]
+            indices = torch.randperm(max_num_indices, device=device)[:num_indices]
             torch.save(indices, path_indices)
 
         upstream_dict = {
@@ -237,8 +222,8 @@ def evaluate(
         upstream_is_soft_labels = upstream_dict["upstream_is_soft_labels"]
 
         # Make both upstream and downstream tensors the same size to get a 50/50 split
-        num_upstream_indices = len(upstream_targets["gt_zero_shot_correctnesses"])
-        max_num_downstream_indices = len(targets["gt_zero_shot_correctnesses"])
+        num_upstream_indices = len(upstream_targets["gt_hard_labels"])
+        max_num_downstream_indices = len(targets["gt_hard_labels"])
         num_indices_to_keep = min(num_upstream_indices, max_num_downstream_indices)
 
         # For upstream, we can just use [:num_samples_keep] in the following, because
@@ -250,7 +235,7 @@ def evaluate(
         if os.path.exists(path_downstream_indices):
             downstream_indices = torch.load(path_downstream_indices)
         else:
-            downstream_indices = torch.randperm(max_num_downstream_indices)[
+            downstream_indices = torch.randperm(max_num_downstream_indices, device=device)[
                 :num_indices_to_keep
             ]
             torch.save(downstream_indices, path_downstream_indices)
@@ -283,92 +268,92 @@ def evaluate(
 
         # Update joint targets
         mixed_targets["gt_oodness"] = torch.cat(
-            [torch.zeros((num_indices_to_keep,)), torch.ones((num_indices_to_keep,))]
+            [torch.zeros((num_indices_to_keep,), device=device), torch.ones((num_indices_to_keep,), device=device)]
         ).int()
-        if is_same_task:
-            if upstream_is_soft_labels and not is_soft_labels:
-                num_classes = upstream_targets["gt_soft_labels"].shape[1]
-                mixed_targets["gt_soft_labels"] = torch.cat(
+
+        if upstream_is_soft_labels and not is_soft_labels:
+            num_classes = upstream_targets["gt_soft_labels"].shape[1]
+            mixed_targets["gt_soft_labels"] = torch.cat(
+                [
+                    upstream_targets["gt_soft_labels"],
+                    F.one_hot(
+                        downstream_targets["gt_hard_labels"],
+                        num_classes=num_classes,
+                    ),
+                ]
+            )
+
+            if not isinstance(model, MCInfoNCEWrapper):
+                mixed_targets["gt_soft_fbar_correctnesses"] = torch.cat(
                     [
-                        upstream_targets["gt_soft_labels"],
-                        F.one_hot(
-                            downstream_targets["gt_hard_labels"],
-                            num_classes=num_classes,
-                        ),
+                        upstream_targets["gt_soft_fbar_correctnesses"],
+                        downstream_targets["gt_hard_fbar_correctnesses"],
+                    ]
+                )
+                mixed_targets["gt_soft_fbar_correctnesses_top5"] = torch.cat(
+                    [
+                        upstream_targets["gt_soft_fbar_correctnesses_top5"],
+                        downstream_targets["gt_hard_fbar_correctnesses_top5"],
                     ]
                 )
 
-                if not isinstance(model, MCInfoNCEWrapper):
-                    mixed_targets["gt_soft_fbar_correctnesses"] = torch.cat(
-                        [
-                            upstream_targets["gt_soft_fbar_correctnesses"],
-                            downstream_targets["gt_hard_fbar_correctnesses"],
-                        ]
-                    )
-                    mixed_targets["gt_soft_fbar_correctnesses_top5"] = torch.cat(
-                        [
-                            upstream_targets["gt_soft_fbar_correctnesses_top5"],
-                            downstream_targets["gt_hard_fbar_correctnesses_top5"],
-                        ]
-                    )
-
-                    mixed_targets["gt_soft_bma_correctnesses"] = torch.cat(
-                        [
-                            upstream_targets["gt_soft_bma_correctnesses"],
-                            downstream_targets["gt_hard_bma_correctnesses"],
-                        ]
-                    )
-                    mixed_targets["gt_soft_bma_correctnesses_top5"] = torch.cat(
-                        [
-                            upstream_targets["gt_soft_bma_correctnesses_top5"],
-                            downstream_targets["gt_hard_bma_correctnesses_top5"],
-                        ]
-                    )
-            elif not upstream_is_soft_labels and is_soft_labels:
-                num_classes = downstream_targets["gt_soft_labels"].shape[1]
-                mixed_targets["gt_soft_labels"] = torch.cat(
+                mixed_targets["gt_soft_bma_correctnesses"] = torch.cat(
                     [
-                        F.one_hot(
-                            upstream_targets["gt_hard_labels"],
-                            num_classes=num_classes,
-                        ),
-                        downstream_targets["gt_soft_labels"],
+                        upstream_targets["gt_soft_bma_correctnesses"],
+                        downstream_targets["gt_hard_bma_correctnesses"],
+                    ]
+                )
+                mixed_targets["gt_soft_bma_correctnesses_top5"] = torch.cat(
+                    [
+                        upstream_targets["gt_soft_bma_correctnesses_top5"],
+                        downstream_targets["gt_hard_bma_correctnesses_top5"],
+                    ]
+                )
+        elif not upstream_is_soft_labels and is_soft_labels:
+            num_classes = downstream_targets["gt_soft_labels"].shape[1]
+            mixed_targets["gt_soft_labels"] = torch.cat(
+                [
+                    F.one_hot(
+                        upstream_targets["gt_hard_labels"],
+                        num_classes=num_classes,
+                    ),
+                    downstream_targets["gt_soft_labels"],
+                ]
+            )
+
+            if not isinstance(model, MCInfoNCEWrapper):
+                mixed_targets["gt_soft_fbar_correctnesses"] = torch.cat(
+                    [
+                        upstream_targets["gt_hard_fbar_correctnesses"],
+                        downstream_targets["gt_soft_fbar_correctnesses"],
+                    ]
+                )
+                mixed_targets["gt_soft_fbar_correctnesses_top5"] = torch.cat(
+                    [
+                        upstream_targets["gt_hard_fbar_correctnesses_top5"],
+                        downstream_targets["gt_soft_fbar_correctnesses_top5"],
                     ]
                 )
 
-                if not isinstance(model, MCInfoNCEWrapper):
-                    mixed_targets["gt_soft_fbar_correctnesses"] = torch.cat(
-                        [
-                            upstream_targets["gt_hard_fbar_correctnesses"],
-                            downstream_targets["gt_soft_fbar_correctnesses"],
-                        ]
-                    )
-                    mixed_targets["gt_soft_fbar_correctnesses_top5"] = torch.cat(
-                        [
-                            upstream_targets["gt_hard_fbar_correctnesses_top5"],
-                            downstream_targets["gt_soft_fbar_correctnesses_top5"],
-                        ]
-                    )
-
-                    mixed_targets["gt_soft_bma_correctnesses"] = torch.cat(
-                        [
-                            upstream_targets["gt_hard_bma_correctnesses"],
-                            downstream_targets["gt_soft_bma_correctnesses"],
-                        ]
-                    )
-                    mixed_targets["gt_soft_bma_correctnesses_top5"] = torch.cat(
-                        [
-                            upstream_targets["gt_hard_bma_correctnesses_top5"],
-                            downstream_targets["gt_soft_bma_correctnesses_top5"],
-                        ]
-                    )
-            elif upstream_is_soft_labels and is_soft_labels:
-                mixed_targets["gt_soft_labels"] = torch.cat(
+                mixed_targets["gt_soft_bma_correctnesses"] = torch.cat(
                     [
-                        upstream_targets["gt_soft_labels"],
-                        downstream_targets["gt_soft_labels"],
+                        upstream_targets["gt_hard_bma_correctnesses"],
+                        downstream_targets["gt_soft_bma_correctnesses"],
                     ]
                 )
+                mixed_targets["gt_soft_bma_correctnesses_top5"] = torch.cat(
+                    [
+                        upstream_targets["gt_hard_bma_correctnesses_top5"],
+                        downstream_targets["gt_soft_bma_correctnesses_top5"],
+                    ]
+                )
+        elif upstream_is_soft_labels and is_soft_labels:
+            mixed_targets["gt_soft_labels"] = torch.cat(
+                [
+                    upstream_targets["gt_soft_labels"],
+                    downstream_targets["gt_soft_labels"],
+                ]
+            )
 
         ood_prefix = "id" if is_upstream else "ood"
         save_prefix = f"{ood_prefix}_test_{loader_name.replace('/', '_')}_mixed_{args.dataset_id.replace('/', '_')}_"
@@ -379,7 +364,6 @@ def evaluate(
             log_probs=mixed_log_probs,
             targets=mixed_targets,
             metrics=metrics,
-            is_same_task=is_same_task,
             is_soft_labels=is_soft_labels,
             save_prefix=save_prefix,
             output_dir=output_dir,
@@ -443,9 +427,7 @@ def evaluate_on_auroc_hard_bma_correctness(
             estimate = -estimates[estimator_name]
 
             gt_hard_bma_correctnesses = targets["gt_hard_bma_correctnesses"]
-            metrics[f"{estimator_name}_auroc_hard_bma_correctness"] = calculate_auroc(
-                estimate, gt_hard_bma_correctnesses, args, soft=False
-            ).item()
+            metrics[f"{estimator_name}_auroc_hard_bma_correctness"] = auroc(gt_hard_bma_correctnesses, estimate).item()
 
             return metrics
 
@@ -456,7 +438,6 @@ def evaluate_on_tasks(
     log_probs,
     targets,
     metrics,
-    is_same_task,
     is_soft_labels,
     save_prefix,
     output_dir,
@@ -467,7 +448,6 @@ def evaluate_on_tasks(
         model=model,
         estimates=estimates,
         targets=targets,
-        is_same_task=is_same_task,
         is_soft_labels=is_soft_labels,
         args=args,
         upstream_is_soft_labels=upstream_is_soft_labels,
@@ -476,7 +456,6 @@ def evaluate_on_tasks(
         model=model,
         estimates=estimates,
         targets=targets,
-        is_same_task=is_same_task,
         is_soft_labels=is_soft_labels,
         args=args,
         upstream_is_soft_labels=upstream_is_soft_labels,
@@ -496,7 +475,6 @@ def evaluate_on_tasks(
             estimates=estimates,
             log_probs=log_probs,
             targets=targets,
-            is_same_task=is_same_task,
             is_soft_labels=is_soft_labels,
             args=args,
             upstream_is_soft_labels=upstream_is_soft_labels,
@@ -506,7 +484,6 @@ def evaluate_on_tasks(
         model=model,
         estimates=estimates,
         targets=targets,
-        is_same_task=is_same_task,
         is_soft_labels=is_soft_labels,
         args=args,
         upstream_is_soft_labels=upstream_is_soft_labels,
@@ -523,7 +500,6 @@ def evaluate_on_tasks(
         model=model,
         estimates=estimates,
         targets=targets,
-        is_same_task=is_same_task,
         is_soft_labels=is_soft_labels,
         output_dir=output_dir,
         save_prefix=save_prefix,
@@ -538,7 +514,6 @@ def evaluate_on_correctness_prediction(
     model,
     estimates,
     targets,
-    is_same_task,
     is_soft_labels,
     args,
     upstream_is_soft_labels,
@@ -553,10 +528,7 @@ def evaluate_on_correctness_prediction(
 
     key_prefix = f"mixed_{args.dataset_id}_" if is_mixed else ""
 
-    gt_zero_shot_correctnesses_original = targets["gt_zero_shot_correctnesses_original"]
-    gt_zero_shot_correctnesses = targets["gt_zero_shot_correctnesses"]
-
-    if is_same_task and not isinstance(model, MCInfoNCEWrapper):
+    if not isinstance(model, MCInfoNCEWrapper):
         gt_hard_fbar_correctnesses_original = targets[
             "gt_hard_fbar_correctnesses_original"
         ]
@@ -589,90 +561,50 @@ def evaluate_on_correctness_prediction(
         # and all others are incorrect (0).
 
         estimate = -estimates[estimator_name]
-        metrics[
-            f"{key_prefix}{estimator_name}_auroc_zero_shot_correctness_original"
-        ] = calculate_auroc(
-            estimate, gt_zero_shot_correctnesses_original, args, soft=False
-        ).item()
-        metrics[
-            f"{key_prefix}{estimator_name}_auroc_zero_shot_correctness"
-        ] = calculate_auroc(
-            estimate, gt_zero_shot_correctnesses, args, soft=False
-        ).item()
 
-        if is_same_task and not isinstance(model, MCInfoNCEWrapper):
+        if not isinstance(model, MCInfoNCEWrapper):
             metrics[
                 f"{key_prefix}{estimator_name}_auroc_hard_fbar_correctness_original"
-            ] = calculate_auroc(
-                estimate, gt_hard_fbar_correctnesses_original, args, soft=False
-            ).item()
+            ] = auroc(gt_hard_fbar_correctnesses_original, estimate).item()
             metrics[
                 f"{key_prefix}{estimator_name}_auroc_hard_fbar_correctness"
-            ] = calculate_auroc(
-                estimate, gt_hard_fbar_correctnesses, args, soft=False
+            ] = auroc(
+                gt_hard_fbar_correctnesses, estimate
             ).item()
             metrics[
                 f"{key_prefix}{estimator_name}_auroc_hard_bma_correctness_original"
-            ] = calculate_auroc(
-                estimate, gt_hard_bma_correctnesses_original, args, soft=False
+            ] = auroc(
+                gt_hard_bma_correctnesses_original, estimate
             ).item()
             metrics[
                 f"{key_prefix}{estimator_name}_auroc_hard_bma_correctness"
-            ] = calculate_auroc(
-                estimate, gt_hard_bma_correctnesses, args, soft=False
+            ] = auroc(
+                gt_hard_bma_correctnesses, estimate
             ).item()
 
             metrics[
                 f"{key_prefix}{estimator_name}_auroc_hard_fbar_correctness_original_top5"
-            ] = calculate_auroc(
-                estimate, gt_hard_fbar_correctnesses_original_top5, args, soft=False
+            ] = auroc(
+                gt_hard_fbar_correctnesses_original_top5, estimate
             ).item()
             metrics[
                 f"{key_prefix}{estimator_name}_auroc_hard_fbar_correctness_top5"
-            ] = calculate_auroc(
-                estimate, gt_hard_fbar_correctnesses_top5, args, soft=False
+            ] = auroc(
+                gt_hard_fbar_correctnesses_top5, estimate
             ).item()
             metrics[
                 f"{key_prefix}{estimator_name}_auroc_hard_bma_correctness_original_top5"
-            ] = calculate_auroc(
-                estimate, gt_hard_bma_correctnesses_original_top5, args, soft=False
+            ] = auroc(
+                gt_hard_bma_correctnesses_original_top5, estimate
             ).item()
             metrics[
                 f"{key_prefix}{estimator_name}_auroc_hard_bma_correctness_top5"
-            ] = calculate_auroc(
-                estimate, gt_hard_bma_correctnesses_top5, args, soft=False
+            ] = auroc(
+                gt_hard_bma_correctnesses_top5, estimate
             ).item()
 
-            if is_soft_labels:
-                metrics[
-                    f"{key_prefix}{estimator_name}_auroc_soft_fbar_correctness"
-                ] = calculate_auroc(
-                    estimate, gt_soft_fbar_correctnesses, args, soft=True
-                ).item()
-                metrics[
-                    f"{key_prefix}{estimator_name}_auroc_soft_bma_correctness"
-                ] = calculate_auroc(
-                    estimate, gt_soft_bma_correctnesses, args, soft=True
-                ).item()
-
-                metrics[
-                    f"{key_prefix}{estimator_name}_auroc_soft_fbar_correctness_top5"
-                ] = calculate_auroc(
-                    estimate, gt_soft_fbar_correctnesses_top5, args, soft=True
-                ).item()
-                metrics[
-                    f"{key_prefix}{estimator_name}_auroc_soft_bma_correctness_top5"
-                ] = calculate_auroc(
-                    estimate, gt_soft_bma_correctnesses_top5, args, soft=True
-                ).item()
-
     # Performance metrics
-    metrics["recall_at_1_original"] = (
-        gt_zero_shot_correctnesses_original.float().mean().item()
-    )
-    metrics["recall_at_1"] = gt_zero_shot_correctnesses.float().mean().item()
-
-    if is_same_task and not isinstance(model, MCInfoNCEWrapper):
+    if not isinstance(model, MCInfoNCEWrapper):
         metrics[f"{key_prefix}hard_fbar_accuracy_original"] = (
             targets["gt_hard_fbar_correctnesses_original"].float().mean().item()
         )
@@ -737,7 +669,6 @@ def evaluate_on_abstained_prediction(
     model,
     estimates,
     targets,
-    is_same_task,
     is_soft_labels,
     args,
     upstream_is_soft_labels,
@@ -752,10 +683,7 @@ def evaluate_on_abstained_prediction(
 
     key_prefix = f"mixed_{args.dataset_id}_" if is_mixed else ""
 
-    gt_zero_shot_correctnesses_original = targets["gt_zero_shot_correctnesses_original"]
-    gt_zero_shot_correctnesses = targets["gt_zero_shot_correctnesses"]
-
-    if is_same_task and not isinstance(model, MCInfoNCEWrapper):
+    if not isinstance(model, MCInfoNCEWrapper):
         gt_hard_fbar_correctnesses_original = targets[
             "gt_hard_fbar_correctnesses_original"
         ]
@@ -784,64 +712,7 @@ def evaluate_on_abstained_prediction(
     for estimator_name in estimates:
         estimate = estimates[estimator_name]
 
-        metrics[
-            f"{key_prefix}{estimator_name}_zero_shot_aurc_original"
-        ] = area_under_risk_coverage_curve(
-            estimate, gt_zero_shot_correctnesses_original
-        ).item()
-        metrics[
-            f"{key_prefix}{estimator_name}_zero_shot_aurc"
-        ] = area_under_risk_coverage_curve(estimate, gt_zero_shot_correctnesses).item()
-        metrics[
-            f"{key_prefix}{estimator_name}_cumulative_zero_shot_abstinence_auc_original"
-        ] = (1 - metrics[f"{key_prefix}{estimator_name}_zero_shot_aurc_original"])
-        metrics[f"{key_prefix}{estimator_name}_cumulative_zero_shot_abstinence_auc"] = (
-            1 - metrics[f"{key_prefix}{estimator_name}_zero_shot_aurc"]
-        )
-        metrics[
-            f"{key_prefix}{estimator_name}_zero_shot_eaurc_original"
-        ] = excess_area_under_risk_coverage_curve(
-            estimate, gt_zero_shot_correctnesses_original
-        )
-        metrics[
-            f"{key_prefix}{estimator_name}_zero_shot_eaurc"
-        ] = excess_area_under_risk_coverage_curve(estimate, gt_zero_shot_correctnesses)
-        metrics[
-            f"{key_prefix}{estimator_name}_zero_shot_aulc_original"
-        ] = area_under_lift_curve(estimate, gt_zero_shot_correctnesses_original).item()
-        metrics[f"{key_prefix}{estimator_name}_zero_shot_aulc"] = area_under_lift_curve(
-            estimate, gt_zero_shot_correctnesses
-        ).item()
-        metrics[
-            f"{key_prefix}{estimator_name}_zero_shot_raulc_original"
-        ] = relative_area_under_lift_curve(
-            estimate, gt_zero_shot_correctnesses_original
-        ).item()
-        metrics[
-            f"{key_prefix}{estimator_name}_zero_shot_raulc"
-        ] = relative_area_under_lift_curve(estimate, gt_zero_shot_correctnesses).item()
-        metrics[
-            f"{key_prefix}{estimator_name}_zero_shot_coverage_for_95_accuracy_original"
-        ] = coverage_for_accuracy(
-            estimate, gt_zero_shot_correctnesses_original, accuracy=0.95
-        ).item()
-        metrics[
-            f"{key_prefix}{estimator_name}_zero_shot_coverage_for_95_accuracy"
-        ] = coverage_for_accuracy(
-            estimate, gt_zero_shot_correctnesses, accuracy=0.95
-        ).item()
-        metrics[
-            f"{key_prefix}{estimator_name}_zero_shot_coverage_for_99_accuracy_original"
-        ] = coverage_for_accuracy(
-            estimate, gt_zero_shot_correctnesses_original, accuracy=0.99
-        ).item()
-        metrics[
-            f"{key_prefix}{estimator_name}_zero_shot_coverage_for_99_accuracy"
-        ] = coverage_for_accuracy(
-            estimate, gt_zero_shot_correctnesses, accuracy=0.99
-        ).item()
-
-        if is_same_task and not isinstance(model, MCInfoNCEWrapper):
+        if not isinstance(model, MCInfoNCEWrapper):
             metrics[
                 f"{key_prefix}{estimator_name}_hard_fbar_aurc_original"
             ] = area_under_risk_coverage_curve(
@@ -1248,8 +1119,8 @@ def evaluate_on_ood_detection(estimates, targets, args):
     for estimator_name in estimates:
         metrics[
             f"mixed_{args.dataset_id}_{estimator_name}_auroc_oodness"
-        ] = calculate_auroc(
-            estimates[estimator_name], targets["gt_oodness"], args, soft=False
+        ] = auroc(
+            targets["gt_oodness"], estimates[estimator_name]
         ).item()
 
     return metrics
@@ -1260,7 +1131,6 @@ def evaluate_on_proper_scoring_and_calibration(
     estimates,
     log_probs,
     targets,
-    is_same_task,
     is_soft_labels,
     args,
     upstream_is_soft_labels,
@@ -1288,437 +1158,378 @@ def evaluate_on_proper_scoring_and_calibration(
     if isinstance(model, BaseCorrectnessPredictionWrapper):
         correctness_estimator_names.append("error_probabilities")
 
-    gt_zero_shot_correctnesses_original = targets["gt_zero_shot_correctnesses_original"]
-    gt_zero_shot_correctnesses = targets["gt_zero_shot_correctnesses"]
+    gt_hard_fbar_correctnesses_original = targets[
+        "gt_hard_fbar_correctnesses_original"
+    ]
+    gt_hard_fbar_correctnesses = targets["gt_hard_fbar_correctnesses"]
+    gt_hard_bma_correctnesses_original = targets[
+        "gt_hard_bma_correctnesses_original"
+    ]
+    gt_hard_bma_correctnesses = targets["gt_hard_bma_correctnesses"]
 
-    if is_same_task:
-        gt_hard_fbar_correctnesses_original = targets[
-            "gt_hard_fbar_correctnesses_original"
-        ]
-        gt_hard_fbar_correctnesses = targets["gt_hard_fbar_correctnesses"]
-        gt_hard_bma_correctnesses_original = targets[
-            "gt_hard_bma_correctnesses_original"
-        ]
-        gt_hard_bma_correctnesses = targets["gt_hard_bma_correctnesses"]
+    gt_hard_fbar_correctnesses_original_top5 = targets[
+        "gt_hard_fbar_correctnesses_original_top5"
+    ]
+    gt_hard_fbar_correctnesses_top5 = targets["gt_hard_fbar_correctnesses_top5"]
+    gt_hard_bma_correctnesses_original_top5 = targets[
+        "gt_hard_bma_correctnesses_original_top5"
+    ]
+    gt_hard_bma_correctnesses_top5 = targets["gt_hard_bma_correctnesses_top5"]
 
-        gt_hard_fbar_correctnesses_original_top5 = targets[
-            "gt_hard_fbar_correctnesses_original_top5"
-        ]
-        gt_hard_fbar_correctnesses_top5 = targets["gt_hard_fbar_correctnesses_top5"]
-        gt_hard_bma_correctnesses_original_top5 = targets[
-            "gt_hard_bma_correctnesses_original_top5"
-        ]
-        gt_hard_bma_correctnesses_top5 = targets["gt_hard_bma_correctnesses_top5"]
+    if is_soft_labels:
+        gt_soft_fbar_correctnesses = targets["gt_soft_fbar_correctnesses"]
+        gt_soft_bma_correctnesses = targets["gt_soft_bma_correctnesses"]
 
-        if is_soft_labels:
-            gt_soft_fbar_correctnesses = targets["gt_soft_fbar_correctnesses"]
-            gt_soft_bma_correctnesses = targets["gt_soft_bma_correctnesses"]
-
-            gt_soft_fbar_correctnesses_top5 = targets["gt_soft_fbar_correctnesses_top5"]
-            gt_soft_bma_correctnesses_top5 = targets["gt_soft_bma_correctnesses_top5"]
+        gt_soft_fbar_correctnesses_top5 = targets["gt_soft_fbar_correctnesses_top5"]
+        gt_soft_bma_correctnesses_top5 = targets["gt_soft_bma_correctnesses_top5"]
 
     for estimator_name in correctness_estimator_names:
         estimate = estimates[estimator_name]
 
         estimate = 1 - estimate  # convert to correctness probability
 
-        # Zero-shot correctness
-        # Binary log probability scoring rule
-        metrics[
-            f"{key_prefix}{estimator_name}_log_prob_score_zero_shot_correctness_original"
-        ] = binary_log_probability(estimate, gt_zero_shot_correctnesses_original).item()
-        metrics[
-            f"{key_prefix}{estimator_name}_log_prob_score_zero_shot_correctness"
-        ] = binary_log_probability(estimate, gt_zero_shot_correctnesses).item()
-
-        # Binary Brier scoring rule
-        metrics[
-            f"{key_prefix}{estimator_name}_brier_score_zero_shot_correctness_original"
-        ] = binary_brier(estimate, gt_zero_shot_correctnesses_original).item()
-        metrics[
-            f"{key_prefix}{estimator_name}_brier_score_zero_shot_correctness"
-        ] = binary_brier(estimate, gt_zero_shot_correctnesses).item()
-
-        # Binary ECE
-        metrics[
-            f"{key_prefix}{estimator_name}_ece_zero_shot_correctness_original"
-        ] = calibration_error(
-            confidences=estimate,
-            correctnesses=gt_zero_shot_correctnesses_original,
-            num_bins=15,
-            norm="l1",
-        ).item()
-        metrics[
-            f"{key_prefix}{estimator_name}_ece_zero_shot_correctness"
-        ] = calibration_error(
-            confidences=estimate,
-            correctnesses=gt_zero_shot_correctnesses,
-            num_bins=15,
-            norm="l1",
-        ).item()
-
-        # Binary MCE
-        metrics[
-            f"{key_prefix}{estimator_name}_mce_zero_shot_correctness_original"
-        ] = calibration_error(
-            confidences=estimate,
-            correctnesses=gt_zero_shot_correctnesses_original,
-            num_bins=15,
-            norm="inf",
-        ).item()
-        metrics[
-            f"{key_prefix}{estimator_name}_mce_zero_shot_correctness"
-        ] = calibration_error(
-            confidences=estimate,
-            correctnesses=gt_zero_shot_correctnesses,
-            num_bins=15,
-            norm="inf",
-        ).item()
-
         # {Hard, Soft}-label correctness
-        if is_same_task:
-            metrics[
-                f"{key_prefix}{estimator_name}_log_prob_score_hard_fbar_correctness_original"
-            ] = binary_log_probability(
-                estimate, gt_hard_fbar_correctnesses_original
-            ).item()
-            metrics[
-                f"{key_prefix}{estimator_name}_log_prob_score_hard_fbar_correctness"
-            ] = binary_log_probability(estimate, gt_hard_fbar_correctnesses).item()
-            metrics[
-                f"{key_prefix}{estimator_name}_brier_score_hard_fbar_correctness_original"
-            ] = binary_brier(estimate, gt_hard_fbar_correctnesses_original).item()
-            metrics[
-                f"{key_prefix}{estimator_name}_brier_score_hard_fbar_correctness"
-            ] = binary_brier(estimate, gt_hard_fbar_correctnesses).item()
-            metrics[
-                f"{key_prefix}{estimator_name}_ece_hard_fbar_correctness_original"
-            ] = calibration_error(
-                confidences=estimate,
-                correctnesses=gt_hard_fbar_correctnesses_original,
-                num_bins=15,
-                norm="l1",
-            ).item()
-            metrics[
-                f"{key_prefix}{estimator_name}_ece_hard_fbar_correctness"
-            ] = calibration_error(
-                confidences=estimate,
-                correctnesses=gt_hard_fbar_correctnesses,
-                num_bins=15,
-                norm="l1",
-            ).item()
-            metrics[
-                f"{key_prefix}{estimator_name}_mce_hard_fbar_correctness_original"
-            ] = calibration_error(
-                confidences=estimate,
-                correctnesses=gt_hard_fbar_correctnesses_original,
-                num_bins=15,
-                norm="inf",
-            ).item()
-            metrics[
-                f"{key_prefix}{estimator_name}_mce_hard_fbar_correctness"
-            ] = calibration_error(
-                confidences=estimate,
-                correctnesses=gt_hard_fbar_correctnesses,
-                num_bins=15,
-                norm="inf",
-            ).item()
-
-            metrics[
-                f"{key_prefix}{estimator_name}_log_prob_score_hard_bma_correctness_original"
-            ] = binary_log_probability(
-                estimate, gt_hard_bma_correctnesses_original
-            ).item()
-            metrics[
-                f"{key_prefix}{estimator_name}_log_prob_score_hard_bma_correctness"
-            ] = binary_log_probability(estimate, gt_hard_bma_correctnesses).item()
-            metrics[
-                f"{key_prefix}{estimator_name}_brier_score_hard_bma_correctness_original"
-            ] = binary_brier(estimate, gt_hard_bma_correctnesses_original).item()
-            metrics[
-                f"{key_prefix}{estimator_name}_brier_score_hard_bma_correctness"
-            ] = binary_brier(estimate, gt_hard_bma_correctnesses).item()
-            metrics[
-                f"{key_prefix}{estimator_name}_ece_hard_bma_correctness_original"
-            ] = calibration_error(
-                confidences=estimate,
-                correctnesses=gt_hard_bma_correctnesses_original,
-                num_bins=15,
-                norm="l1",
-            ).item()
-            metrics[
-                f"{key_prefix}{estimator_name}_ece_hard_bma_correctness"
-            ] = calibration_error(
-                confidences=estimate,
-                correctnesses=gt_hard_bma_correctnesses,
-                num_bins=15,
-                norm="l1",
-            ).item()
-            metrics[
-                f"{key_prefix}{estimator_name}_mce_hard_bma_correctness_original"
-            ] = calibration_error(
-                confidences=estimate,
-                correctnesses=gt_hard_bma_correctnesses_original,
-                num_bins=15,
-                norm="inf",
-            ).item()
-            metrics[
-                f"{key_prefix}{estimator_name}_mce_hard_bma_correctness"
-            ] = calibration_error(
-                confidences=estimate,
-                correctnesses=gt_hard_bma_correctnesses,
-                num_bins=15,
-                norm="inf",
-            ).item()
-
-            metrics[
-                f"{key_prefix}{estimator_name}_log_prob_score_hard_fbar_correctness_original_top5"
-            ] = binary_log_probability(
-                estimate, gt_hard_fbar_correctnesses_original_top5
-            ).item()
-            metrics[
-                f"{key_prefix}{estimator_name}_log_prob_score_hard_fbar_correctness_top5"
-            ] = binary_log_probability(estimate, gt_hard_fbar_correctnesses_top5).item()
-            metrics[
-                f"{key_prefix}{estimator_name}_brier_score_hard_fbar_correctness_original_top5"
-            ] = binary_brier(estimate, gt_hard_fbar_correctnesses_original_top5).item()
-            metrics[
-                f"{key_prefix}{estimator_name}_brier_score_hard_fbar_correctness_top5"
-            ] = binary_brier(estimate, gt_hard_fbar_correctnesses_top5).item()
-            metrics[
-                f"{key_prefix}{estimator_name}_ece_hard_fbar_correctness_original_top5"
-            ] = calibration_error(
-                confidences=estimate,
-                correctnesses=gt_hard_fbar_correctnesses_original_top5,
-                num_bins=15,
-                norm="l1",
-            ).item()
-            metrics[
-                f"{key_prefix}{estimator_name}_ece_hard_fbar_correctness_top5"
-            ] = calibration_error(
-                confidences=estimate,
-                correctnesses=gt_hard_fbar_correctnesses_top5,
-                num_bins=15,
-                norm="l1",
-            ).item()
-            metrics[
-                f"{key_prefix}{estimator_name}_mce_hard_fbar_correctness_original_top5"
-            ] = calibration_error(
-                confidences=estimate,
-                correctnesses=gt_hard_fbar_correctnesses_original_top5,
-                num_bins=15,
-                norm="inf",
-            ).item()
-            metrics[
-                f"{key_prefix}{estimator_name}_mce_hard_fbar_correctness_top5"
-            ] = calibration_error(
-                confidences=estimate,
-                correctnesses=gt_hard_fbar_correctnesses_top5,
-                num_bins=15,
-                norm="inf",
-            ).item()
-
-            metrics[
-                f"{key_prefix}{estimator_name}_log_prob_score_hard_bma_correctness_original_top5"
-            ] = binary_log_probability(
-                estimate, gt_hard_bma_correctnesses_original_top5
-            ).item()
-            metrics[
-                f"{key_prefix}{estimator_name}_log_prob_score_hard_bma_correctness_top5"
-            ] = binary_log_probability(estimate, gt_hard_bma_correctnesses_top5).item()
-            metrics[
-                f"{key_prefix}{estimator_name}_brier_score_hard_bma_correctness_original_top5"
-            ] = binary_brier(estimate, gt_hard_bma_correctnesses_original_top5).item()
-            metrics[
-                f"{key_prefix}{estimator_name}_brier_score_hard_bma_correctness_top5"
-            ] = binary_brier(estimate, gt_hard_bma_correctnesses_top5).item()
-            metrics[
-                f"{key_prefix}{estimator_name}_ece_hard_bma_correctness_original_top5"
-            ] = calibration_error(
-                confidences=estimate,
-                correctnesses=gt_hard_bma_correctnesses_original_top5,
-                num_bins=15,
-                norm="l1",
-            ).item()
-            metrics[
-                f"{key_prefix}{estimator_name}_ece_hard_bma_correctness_top5"
-            ] = calibration_error(
-                confidences=estimate,
-                correctnesses=gt_hard_bma_correctnesses_top5,
-                num_bins=15,
-                norm="l1",
-            ).item()
-            metrics[
-                f"{key_prefix}{estimator_name}_mce_hard_bma_correctness_original_top5"
-            ] = calibration_error(
-                confidences=estimate,
-                correctnesses=gt_hard_bma_correctnesses_original_top5,
-                num_bins=15,
-                norm="inf",
-            ).item()
-            metrics[
-                f"{key_prefix}{estimator_name}_mce_hard_bma_correctness_top5"
-            ] = calibration_error(
-                confidences=estimate,
-                correctnesses=gt_hard_bma_correctnesses_top5,
-                num_bins=15,
-                norm="inf",
-            ).item()
-
-            if is_soft_labels:
-                metrics[
-                    f"{key_prefix}{estimator_name}_log_prob_score_soft_fbar_correctness"
-                ] = binary_log_probability(estimate, gt_soft_fbar_correctnesses).item()
-                metrics[
-                    f"{key_prefix}{estimator_name}_brier_score_soft_fbar_correctness"
-                ] = binary_brier(estimate, gt_soft_fbar_correctnesses).item()
-                metrics[
-                    f"{key_prefix}{estimator_name}_ece_soft_fbar_correctness"
-                ] = calibration_error(
-                    confidences=estimate,
-                    correctnesses=gt_soft_fbar_correctnesses,
-                    num_bins=15,
-                    norm="l1",
-                ).item()
-                metrics[
-                    f"{key_prefix}{estimator_name}_mce_soft_fbar_correctness"
-                ] = calibration_error(
-                    confidences=estimate,
-                    correctnesses=gt_soft_fbar_correctnesses,
-                    num_bins=15,
-                    norm="inf",
-                ).item()
-
-                metrics[
-                    f"{key_prefix}{estimator_name}_log_prob_score_soft_bma_correctness"
-                ] = binary_log_probability(estimate, gt_soft_bma_correctnesses).item()
-                metrics[
-                    f"{key_prefix}{estimator_name}_brier_score_soft_bma_correctness"
-                ] = binary_brier(estimate, gt_soft_bma_correctnesses).item()
-                metrics[
-                    f"{key_prefix}{estimator_name}_ece_soft_bma_correctness"
-                ] = calibration_error(
-                    confidences=estimate,
-                    correctnesses=gt_soft_bma_correctnesses,
-                    num_bins=15,
-                    norm="l1",
-                ).item()
-                metrics[
-                    f"{key_prefix}{estimator_name}_mce_soft_bma_correctness"
-                ] = calibration_error(
-                    confidences=estimate,
-                    correctnesses=gt_soft_bma_correctnesses,
-                    num_bins=15,
-                    norm="inf",
-                ).item()
-
-                metrics[
-                    f"{key_prefix}{estimator_name}_log_prob_score_soft_fbar_correctness_top5"
-                ] = binary_log_probability(
-                    estimate, gt_soft_fbar_correctnesses_top5
-                ).item()
-                metrics[
-                    f"{key_prefix}{estimator_name}_brier_score_soft_fbar_correctness_top5"
-                ] = binary_brier(estimate, gt_soft_fbar_correctnesses_top5).item()
-                metrics[
-                    f"{key_prefix}{estimator_name}_ece_soft_fbar_correctness_top5"
-                ] = calibration_error(
-                    confidences=estimate,
-                    correctnesses=gt_soft_fbar_correctnesses_top5,
-                    num_bins=15,
-                    norm="l1",
-                ).item()
-                metrics[
-                    f"{key_prefix}{estimator_name}_mce_soft_fbar_correctness_top5"
-                ] = calibration_error(
-                    confidences=estimate,
-                    correctnesses=gt_soft_fbar_correctnesses_top5,
-                    num_bins=15,
-                    norm="inf",
-                ).item()
-
-                metrics[
-                    f"{key_prefix}{estimator_name}_log_prob_score_soft_bma_correctness_top5"
-                ] = binary_log_probability(
-                    estimate, gt_soft_bma_correctnesses_top5
-                ).item()
-                metrics[
-                    f"{key_prefix}{estimator_name}_brier_score_soft_bma_correctness_top5"
-                ] = binary_brier(estimate, gt_soft_bma_correctnesses_top5).item()
-                metrics[
-                    f"{key_prefix}{estimator_name}_ece_soft_bma_correctness_top5"
-                ] = calibration_error(
-                    confidences=estimate,
-                    correctnesses=gt_soft_bma_correctnesses_top5,
-                    num_bins=15,
-                    norm="l1",
-                ).item()
-                metrics[
-                    f"{key_prefix}{estimator_name}_mce_soft_bma_correctness_top5"
-                ] = calibration_error(
-                    confidences=estimate,
-                    correctnesses=gt_soft_bma_correctnesses_top5,
-                    num_bins=15,
-                    norm="inf",
-                ).item()
-
-    # Proper scoring for aleatoric uncertainty
-    if is_same_task:
-        gt_hard_labels_original = targets["gt_hard_labels_original"]
-        gt_hard_labels = targets["gt_hard_labels"]
-
         metrics[
-            f"{key_prefix}log_prob_score_hard_fbar_aleatoric_original"
-        ] = multiclass_log_probability(
-            log_probs["log_fbars"], gt_hard_labels_original
+            f"{key_prefix}{estimator_name}_log_prob_score_hard_fbar_correctness_original"
+        ] = binary_log_probability(
+            estimate, gt_hard_fbar_correctnesses_original
         ).item()
         metrics[
-            f"{key_prefix}log_prob_score_hard_fbar_aleatoric"
-        ] = multiclass_log_probability(log_probs["log_fbars"], gt_hard_labels).item()
+            f"{key_prefix}{estimator_name}_log_prob_score_hard_fbar_correctness"
+        ] = binary_log_probability(estimate, gt_hard_fbar_correctnesses).item()
         metrics[
-            f"{key_prefix}brier_score_hard_fbar_aleatoric_original"
-        ] = multiclass_brier(
-            log_probs["log_fbars"], gt_hard_labels_original, is_soft_targets=False
+            f"{key_prefix}{estimator_name}_brier_score_hard_fbar_correctness_original"
+        ] = binary_brier(estimate, gt_hard_fbar_correctnesses_original).item()
+        metrics[
+            f"{key_prefix}{estimator_name}_brier_score_hard_fbar_correctness"
+        ] = binary_brier(estimate, gt_hard_fbar_correctnesses).item()
+        metrics[
+            f"{key_prefix}{estimator_name}_ece_hard_fbar_correctness_original"
+        ] = calibration_error(
+            confidences=estimate,
+            correctnesses=gt_hard_fbar_correctnesses_original,
+            num_bins=15,
+            norm="l1",
         ).item()
-        metrics[f"{key_prefix}brier_score_hard_fbar_aleatoric"] = multiclass_brier(
-            log_probs["log_fbars"], gt_hard_labels, is_soft_targets=False
+        metrics[
+            f"{key_prefix}{estimator_name}_ece_hard_fbar_correctness"
+        ] = calibration_error(
+            confidences=estimate,
+            correctnesses=gt_hard_fbar_correctnesses,
+            num_bins=15,
+            norm="l1",
+        ).item()
+        metrics[
+            f"{key_prefix}{estimator_name}_mce_hard_fbar_correctness_original"
+        ] = calibration_error(
+            confidences=estimate,
+            correctnesses=gt_hard_fbar_correctnesses_original,
+            num_bins=15,
+            norm="inf",
+        ).item()
+        metrics[
+            f"{key_prefix}{estimator_name}_mce_hard_fbar_correctness"
+        ] = calibration_error(
+            confidences=estimate,
+            correctnesses=gt_hard_fbar_correctnesses,
+            num_bins=15,
+            norm="inf",
         ).item()
 
         metrics[
-            f"{key_prefix}log_prob_score_hard_bma_aleatoric_original"
-        ] = multiclass_log_probability(
-            log_probs["log_bmas"], gt_hard_labels_original
+            f"{key_prefix}{estimator_name}_log_prob_score_hard_bma_correctness_original"
+        ] = binary_log_probability(
+            estimate, gt_hard_bma_correctnesses_original
         ).item()
         metrics[
-            f"{key_prefix}log_prob_score_hard_bma_aleatoric"
-        ] = multiclass_log_probability(log_probs["log_bmas"], gt_hard_labels).item()
+            f"{key_prefix}{estimator_name}_log_prob_score_hard_bma_correctness"
+        ] = binary_log_probability(estimate, gt_hard_bma_correctnesses).item()
         metrics[
-            f"{key_prefix}brier_score_hard_bma_aleatoric_original"
-        ] = multiclass_brier(
-            log_probs["log_bmas"], gt_hard_labels_original, is_soft_targets=False
+            f"{key_prefix}{estimator_name}_brier_score_hard_bma_correctness_original"
+        ] = binary_brier(estimate, gt_hard_bma_correctnesses_original).item()
+        metrics[
+            f"{key_prefix}{estimator_name}_brier_score_hard_bma_correctness"
+        ] = binary_brier(estimate, gt_hard_bma_correctnesses).item()
+        metrics[
+            f"{key_prefix}{estimator_name}_ece_hard_bma_correctness_original"
+        ] = calibration_error(
+            confidences=estimate,
+            correctnesses=gt_hard_bma_correctnesses_original,
+            num_bins=15,
+            norm="l1",
         ).item()
-        metrics[f"{key_prefix}brier_score_hard_bma_aleatoric"] = multiclass_brier(
-            log_probs["log_bmas"], gt_hard_labels, is_soft_targets=False
+        metrics[
+            f"{key_prefix}{estimator_name}_ece_hard_bma_correctness"
+        ] = calibration_error(
+            confidences=estimate,
+            correctnesses=gt_hard_bma_correctnesses,
+            num_bins=15,
+            norm="l1",
+        ).item()
+        metrics[
+            f"{key_prefix}{estimator_name}_mce_hard_bma_correctness_original"
+        ] = calibration_error(
+            confidences=estimate,
+            correctnesses=gt_hard_bma_correctnesses_original,
+            num_bins=15,
+            norm="inf",
+        ).item()
+        metrics[
+            f"{key_prefix}{estimator_name}_mce_hard_bma_correctness"
+        ] = calibration_error(
+            confidences=estimate,
+            correctnesses=gt_hard_bma_correctnesses,
+            num_bins=15,
+            norm="inf",
+        ).item()
+
+        metrics[
+            f"{key_prefix}{estimator_name}_log_prob_score_hard_fbar_correctness_original_top5"
+        ] = binary_log_probability(
+            estimate, gt_hard_fbar_correctnesses_original_top5
+        ).item()
+        metrics[
+            f"{key_prefix}{estimator_name}_log_prob_score_hard_fbar_correctness_top5"
+        ] = binary_log_probability(estimate, gt_hard_fbar_correctnesses_top5).item()
+        metrics[
+            f"{key_prefix}{estimator_name}_brier_score_hard_fbar_correctness_original_top5"
+        ] = binary_brier(estimate, gt_hard_fbar_correctnesses_original_top5).item()
+        metrics[
+            f"{key_prefix}{estimator_name}_brier_score_hard_fbar_correctness_top5"
+        ] = binary_brier(estimate, gt_hard_fbar_correctnesses_top5).item()
+        metrics[
+            f"{key_prefix}{estimator_name}_ece_hard_fbar_correctness_original_top5"
+        ] = calibration_error(
+            confidences=estimate,
+            correctnesses=gt_hard_fbar_correctnesses_original_top5,
+            num_bins=15,
+            norm="l1",
+        ).item()
+        metrics[
+            f"{key_prefix}{estimator_name}_ece_hard_fbar_correctness_top5"
+        ] = calibration_error(
+            confidences=estimate,
+            correctnesses=gt_hard_fbar_correctnesses_top5,
+            num_bins=15,
+            norm="l1",
+        ).item()
+        metrics[
+            f"{key_prefix}{estimator_name}_mce_hard_fbar_correctness_original_top5"
+        ] = calibration_error(
+            confidences=estimate,
+            correctnesses=gt_hard_fbar_correctnesses_original_top5,
+            num_bins=15,
+            norm="inf",
+        ).item()
+        metrics[
+            f"{key_prefix}{estimator_name}_mce_hard_fbar_correctness_top5"
+        ] = calibration_error(
+            confidences=estimate,
+            correctnesses=gt_hard_fbar_correctnesses_top5,
+            num_bins=15,
+            norm="inf",
+        ).item()
+
+        metrics[
+            f"{key_prefix}{estimator_name}_log_prob_score_hard_bma_correctness_original_top5"
+        ] = binary_log_probability(
+            estimate, gt_hard_bma_correctnesses_original_top5
+        ).item()
+        metrics[
+            f"{key_prefix}{estimator_name}_log_prob_score_hard_bma_correctness_top5"
+        ] = binary_log_probability(estimate, gt_hard_bma_correctnesses_top5).item()
+        metrics[
+            f"{key_prefix}{estimator_name}_brier_score_hard_bma_correctness_original_top5"
+        ] = binary_brier(estimate, gt_hard_bma_correctnesses_original_top5).item()
+        metrics[
+            f"{key_prefix}{estimator_name}_brier_score_hard_bma_correctness_top5"
+        ] = binary_brier(estimate, gt_hard_bma_correctnesses_top5).item()
+        metrics[
+            f"{key_prefix}{estimator_name}_ece_hard_bma_correctness_original_top5"
+        ] = calibration_error(
+            confidences=estimate,
+            correctnesses=gt_hard_bma_correctnesses_original_top5,
+            num_bins=15,
+            norm="l1",
+        ).item()
+        metrics[
+            f"{key_prefix}{estimator_name}_ece_hard_bma_correctness_top5"
+        ] = calibration_error(
+            confidences=estimate,
+            correctnesses=gt_hard_bma_correctnesses_top5,
+            num_bins=15,
+            norm="l1",
+        ).item()
+        metrics[
+            f"{key_prefix}{estimator_name}_mce_hard_bma_correctness_original_top5"
+        ] = calibration_error(
+            confidences=estimate,
+            correctnesses=gt_hard_bma_correctnesses_original_top5,
+            num_bins=15,
+            norm="inf",
+        ).item()
+        metrics[
+            f"{key_prefix}{estimator_name}_mce_hard_bma_correctness_top5"
+        ] = calibration_error(
+            confidences=estimate,
+            correctnesses=gt_hard_bma_correctnesses_top5,
+            num_bins=15,
+            norm="inf",
         ).item()
 
         if is_soft_labels:
-            gt_soft_labels = targets["gt_soft_labels"]
+            metrics[
+                f"{key_prefix}{estimator_name}_log_prob_score_soft_fbar_correctness"
+            ] = binary_log_probability(estimate, gt_soft_fbar_correctnesses).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_brier_score_soft_fbar_correctness"
+            ] = binary_brier(estimate, gt_soft_fbar_correctnesses).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_ece_soft_fbar_correctness"
+            ] = calibration_error(
+                confidences=estimate,
+                correctnesses=gt_soft_fbar_correctnesses,
+                num_bins=15,
+                norm="l1",
+            ).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_mce_soft_fbar_correctness"
+            ] = calibration_error(
+                confidences=estimate,
+                correctnesses=gt_soft_fbar_correctnesses,
+                num_bins=15,
+                norm="inf",
+            ).item()
 
             metrics[
-                f"{key_prefix}log_prob_score_soft_fbar_aleatoric"
-            ] = multiclass_log_probability(
-                log_probs["log_fbars"], gt_soft_labels
+                f"{key_prefix}{estimator_name}_log_prob_score_soft_bma_correctness"
+            ] = binary_log_probability(estimate, gt_soft_bma_correctnesses).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_brier_score_soft_bma_correctness"
+            ] = binary_brier(estimate, gt_soft_bma_correctnesses).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_ece_soft_bma_correctness"
+            ] = calibration_error(
+                confidences=estimate,
+                correctnesses=gt_soft_bma_correctnesses,
+                num_bins=15,
+                norm="l1",
             ).item()
-            metrics[f"{key_prefix}brier_score_soft_fbar_aleatoric"] = multiclass_brier(
-                log_probs["log_fbars"], gt_soft_labels, is_soft_targets=True
+            metrics[
+                f"{key_prefix}{estimator_name}_mce_soft_bma_correctness"
+            ] = calibration_error(
+                confidences=estimate,
+                correctnesses=gt_soft_bma_correctnesses,
+                num_bins=15,
+                norm="inf",
             ).item()
 
             metrics[
-                f"{key_prefix}log_prob_score_soft_bma_aleatoric"
-            ] = multiclass_log_probability(log_probs["log_bmas"], gt_soft_labels).item()
-            metrics[f"{key_prefix}brier_score_soft_bma_aleatoric"] = multiclass_brier(
-                log_probs["log_bmas"], gt_soft_labels, is_soft_targets=True
+                f"{key_prefix}{estimator_name}_log_prob_score_soft_fbar_correctness_top5"
+            ] = binary_log_probability(
+                estimate, gt_soft_fbar_correctnesses_top5
             ).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_brier_score_soft_fbar_correctness_top5"
+            ] = binary_brier(estimate, gt_soft_fbar_correctnesses_top5).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_ece_soft_fbar_correctness_top5"
+            ] = calibration_error(
+                confidences=estimate,
+                correctnesses=gt_soft_fbar_correctnesses_top5,
+                num_bins=15,
+                norm="l1",
+            ).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_mce_soft_fbar_correctness_top5"
+            ] = calibration_error(
+                confidences=estimate,
+                correctnesses=gt_soft_fbar_correctnesses_top5,
+                num_bins=15,
+                norm="inf",
+            ).item()
+
+            metrics[
+                f"{key_prefix}{estimator_name}_log_prob_score_soft_bma_correctness_top5"
+            ] = binary_log_probability(
+                estimate, gt_soft_bma_correctnesses_top5
+            ).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_brier_score_soft_bma_correctness_top5"
+            ] = binary_brier(estimate, gt_soft_bma_correctnesses_top5).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_ece_soft_bma_correctness_top5"
+            ] = calibration_error(
+                confidences=estimate,
+                correctnesses=gt_soft_bma_correctnesses_top5,
+                num_bins=15,
+                norm="l1",
+            ).item()
+            metrics[
+                f"{key_prefix}{estimator_name}_mce_soft_bma_correctness_top5"
+            ] = calibration_error(
+                confidences=estimate,
+                correctnesses=gt_soft_bma_correctnesses_top5,
+                num_bins=15,
+                norm="inf",
+            ).item()
+
+    # Proper scoring for aleatoric uncertainty
+    gt_hard_labels_original = targets["gt_hard_labels_original"]
+    gt_hard_labels = targets["gt_hard_labels"]
+
+    metrics[
+        f"{key_prefix}log_prob_score_hard_fbar_aleatoric_original"
+    ] = multiclass_log_probability(
+        log_probs["log_fbars"], gt_hard_labels_original
+    ).item()
+    metrics[
+        f"{key_prefix}log_prob_score_hard_fbar_aleatoric"
+    ] = multiclass_log_probability(log_probs["log_fbars"], gt_hard_labels).item()
+    metrics[
+        f"{key_prefix}brier_score_hard_fbar_aleatoric_original"
+    ] = multiclass_brier(
+        log_probs["log_fbars"], gt_hard_labels_original, is_soft_targets=False
+    ).item()
+    metrics[f"{key_prefix}brier_score_hard_fbar_aleatoric"] = multiclass_brier(
+        log_probs["log_fbars"], gt_hard_labels, is_soft_targets=False
+    ).item()
+
+    metrics[
+        f"{key_prefix}log_prob_score_hard_bma_aleatoric_original"
+    ] = multiclass_log_probability(
+        log_probs["log_bmas"], gt_hard_labels_original
+    ).item()
+    metrics[
+        f"{key_prefix}log_prob_score_hard_bma_aleatoric"
+    ] = multiclass_log_probability(log_probs["log_bmas"], gt_hard_labels).item()
+    metrics[
+        f"{key_prefix}brier_score_hard_bma_aleatoric_original"
+    ] = multiclass_brier(
+        log_probs["log_bmas"], gt_hard_labels_original, is_soft_targets=False
+    ).item()
+    metrics[f"{key_prefix}brier_score_hard_bma_aleatoric"] = multiclass_brier(
+        log_probs["log_bmas"], gt_hard_labels, is_soft_targets=False
+    ).item()
+
+    if is_soft_labels:
+        gt_soft_labels = targets["gt_soft_labels"]
+
+        metrics[
+            f"{key_prefix}log_prob_score_soft_fbar_aleatoric"
+        ] = multiclass_log_probability(
+            log_probs["log_fbars"], gt_soft_labels
+        ).item()
+        metrics[f"{key_prefix}brier_score_soft_fbar_aleatoric"] = multiclass_brier(
+            log_probs["log_fbars"], gt_soft_labels, is_soft_targets=True
+        ).item()
+
+        metrics[
+            f"{key_prefix}log_prob_score_soft_bma_aleatoric"
+        ] = multiclass_log_probability(log_probs["log_bmas"], gt_soft_labels).item()
+        metrics[f"{key_prefix}brier_score_soft_bma_aleatoric"] = multiclass_brier(
+            log_probs["log_bmas"], gt_soft_labels, is_soft_targets=True
+        ).item()
 
     return metrics
 
@@ -1727,7 +1538,6 @@ def evaluate_on_bregman(
     model,
     estimates,
     targets,
-    is_same_task,
     is_soft_labels,
     args,
     upstream_is_soft_labels,
@@ -1742,7 +1552,7 @@ def evaluate_on_bregman(
 
     key_prefix = f"mixed_{args.dataset_id}_" if is_mixed else ""
 
-    if is_same_task and not isinstance(model, MCInfoNCEWrapper):
+    if not isinstance(model, MCInfoNCEWrapper):
         gt_predictives_bregman_fbar = targets["gt_predictives_bregman_fbar"]
         gt_predictives_bregman_bma = targets["gt_predictives_bregman_bma"]
 
@@ -1766,7 +1576,7 @@ def evaluate_on_bregman(
         if not isinstance(model, MCInfoNCEWrapper):
             metrics[
                 f"{key_prefix}{estimator_name}_rank_correlation_bregman_eu"
-            ] = float(spearmanr(estimate, gt_epistemics_bregman)[0])
+            ] = spearmanr(estimate, gt_epistemics_bregman).item()
             metrics[f"{key_prefix}{estimator_name}_mse_bregman_eu"] = (
                 (estimate - gt_epistemics_bregman).square().mean().item()
             )
@@ -1777,7 +1587,7 @@ def evaluate_on_bregman(
         if is_soft_labels:
             metrics[
                 f"{key_prefix}{estimator_name}_rank_correlation_bregman_au"
-            ] = float(spearmanr(estimate, gt_aleatorics_bregman)[0])
+            ] = spearmanr(estimate, gt_aleatorics_bregman).item()
             metrics[f"{key_prefix}{estimator_name}_mse_bregman_au"] = (
                 (estimate - gt_aleatorics_bregman).square().mean().item()
             )
@@ -1787,12 +1597,12 @@ def evaluate_on_bregman(
 
             metrics[
                 f"{key_prefix}{estimator_name}_auroc_multiple_labels"
-            ] = calculate_auroc(estimate, multi_label_indices, args, soft=False).item()
+            ] = auroc(multi_label_indices, estimate).item()
 
-        if is_same_task and not isinstance(model, MCInfoNCEWrapper):
+        if not isinstance(model, MCInfoNCEWrapper):
             metrics[
                 f"{key_prefix}{estimator_name}_rank_correlation_bregman_pu_fbar"
-            ] = float(spearmanr(estimate, gt_predictives_bregman_fbar)[0])
+            ] = spearmanr(estimate, gt_predictives_bregman_fbar).item()
             metrics[f"{key_prefix}{estimator_name}_mse_bregman_pu_fbar"] = (
                 (estimate - gt_predictives_bregman_fbar).square().mean().item()
             )
@@ -1802,7 +1612,7 @@ def evaluate_on_bregman(
 
             metrics[
                 f"{key_prefix}{estimator_name}_rank_correlation_bregman_total_pu_fbar"
-            ] = float(spearmanr(estimate, gt_total_predictives_bregman_fbar)[0])
+            ] = spearmanr(estimate, gt_total_predictives_bregman_fbar).item()
             metrics[f"{key_prefix}{estimator_name}_mse_bregman_total_pu_fbar"] = (
                 (estimate - gt_total_predictives_bregman_fbar).square().mean().item()
             )
@@ -1812,7 +1622,7 @@ def evaluate_on_bregman(
 
             metrics[
                 f"{key_prefix}{estimator_name}_rank_correlation_bregman_pu_bma"
-            ] = float(spearmanr(estimate, gt_predictives_bregman_bma)[0])
+            ] = spearmanr(estimate, gt_predictives_bregman_bma).item()
             metrics[f"{key_prefix}{estimator_name}_mse_bregman_pu_bma"] = (
                 (estimate - gt_predictives_bregman_bma).square().mean().item()
             )
@@ -1822,7 +1632,7 @@ def evaluate_on_bregman(
 
             metrics[
                 f"{key_prefix}{estimator_name}_rank_correlation_bregman_total_pu_bma"
-            ] = float(spearmanr(estimate, gt_total_predictives_bregman_bma)[0])
+            ] = spearmanr(estimate, gt_total_predictives_bregman_bma).item()
             metrics[f"{key_prefix}{estimator_name}_mse_bregman_total_pu_bma"] = (
                 (estimate - gt_total_predictives_bregman_bma).square().mean().item()
             )
@@ -1833,7 +1643,7 @@ def evaluate_on_bregman(
             if is_soft_labels:
                 metrics[
                     f"{key_prefix}{estimator_name}_rank_correlation_bregman_b_fbar"
-                ] = float(spearmanr(estimate, gt_biases_bregman_fbar)[0])
+                ] = spearmanr(estimate, gt_biases_bregman_fbar).item()
                 metrics[f"{key_prefix}{estimator_name}_mse_bregman_b_fbar"] = (
                     (estimate - gt_biases_bregman_fbar).square().mean().item()
                 )
@@ -1843,7 +1653,7 @@ def evaluate_on_bregman(
 
                 metrics[
                     f"{key_prefix}{estimator_name}_rank_correlation_bregman_b_bma"
-                ] = float(spearmanr(estimate, gt_biases_bregman_bma)[0])
+                ] = spearmanr(estimate, gt_biases_bregman_bma).item()
                 metrics[f"{key_prefix}{estimator_name}_mse_bregman_b_bma"] = (
                     (estimate - gt_biases_bregman_bma).square().mean().item()
                 )
@@ -1876,10 +1686,10 @@ def evaluate_on_correlation_of_estimators(
         )
 
         metrics[f"{key_prefix}correlation_ddu_au_eu"] = float(
-            pearsonr(ddu_aleatoric, ddu_epistemic)[0]
+            pearsonr(ddu_aleatoric, ddu_epistemic)
         )
         metrics[f"{key_prefix}rank_correlation_ddu_au_eu"] = float(
-            spearmanr(ddu_aleatoric, ddu_epistemic)[0]
+            spearmanr(ddu_aleatoric, ddu_epistemic)
         )
     elif isinstance(model, MahalanobisWrapper):
         mahalanobis_aleatoric = estimates["expected_entropies"]
@@ -1891,10 +1701,10 @@ def evaluate_on_correlation_of_estimators(
         )
 
         metrics[f"{key_prefix}correlation_mahalanobis_au_eu"] = float(
-            pearsonr(mahalanobis_aleatoric, mahalanobis_epistemic)[0]
+            pearsonr(mahalanobis_aleatoric, mahalanobis_epistemic)
         )
         metrics[f"{key_prefix}rank_correlation_mahalanobis_au_eu"] = float(
-            spearmanr(mahalanobis_aleatoric, mahalanobis_epistemic)[0]
+            spearmanr(mahalanobis_aleatoric, mahalanobis_epistemic)
         )
 
     # Gaussian logit decomposition of Kendall and Gal
@@ -1909,10 +1719,10 @@ def evaluate_on_correlation_of_estimators(
         )
 
         metrics[f"{key_prefix}correlation_kendall_gal_au_eu_prob"] = float(
-            pearsonr(kendall_gal_aleatoric, kendall_gal_epistemic_prob)[0]
+            pearsonr(kendall_gal_aleatoric, kendall_gal_epistemic_prob)
         )
         metrics[f"{key_prefix}rank_correlation_kendall_gal_au_eu_prob"] = float(
-            spearmanr(kendall_gal_aleatoric, kendall_gal_epistemic_prob)[0]
+            spearmanr(kendall_gal_aleatoric, kendall_gal_epistemic_prob)
         )
 
         torch.save(
@@ -1921,10 +1731,10 @@ def evaluate_on_correlation_of_estimators(
         )
 
         metrics[f"{key_prefix}correlation_kendall_gal_au_eu_logit"] = float(
-            pearsonr(kendall_gal_aleatoric, kendall_gal_epistemic_logit)[0]
+            pearsonr(kendall_gal_aleatoric, kendall_gal_epistemic_logit)
         )
         metrics[f"{key_prefix}rank_correlation_kendall_gal_au_eu_logit"] = float(
-            spearmanr(kendall_gal_aleatoric, kendall_gal_epistemic_logit)[0]
+            spearmanr(kendall_gal_aleatoric, kendall_gal_epistemic_logit)
         )
 
     # Internal Gaussian logit decomposition of Kendall and Gal
@@ -1943,12 +1753,12 @@ def evaluate_on_correlation_of_estimators(
         )
 
         metrics[f"{key_prefix}correlation_kendall_gal_au_eu_internal_prob"] = float(
-            pearsonr(kendall_gal_aleatoric, kendall_gal_epistemic_internal_prob)[0]
+            pearsonr(kendall_gal_aleatoric, kendall_gal_epistemic_internal_prob)
         )
         metrics[
             f"{key_prefix}rank_correlation_kendall_gal_au_eu_internal_prob"
         ] = float(
-            spearmanr(kendall_gal_aleatoric, kendall_gal_epistemic_internal_prob)[0]
+            spearmanr(kendall_gal_aleatoric, kendall_gal_epistemic_internal_prob)
         )
 
         torch.save(
@@ -1957,12 +1767,12 @@ def evaluate_on_correlation_of_estimators(
         )
 
         metrics[f"{key_prefix}correlation_kendall_gal_au_eu_internal_logit"] = float(
-            pearsonr(kendall_gal_aleatoric, kendall_gal_epistemic_internal_logit)[0]
+            pearsonr(kendall_gal_aleatoric, kendall_gal_epistemic_internal_logit)
         )
         metrics[
             f"{key_prefix}rank_correlation_kendall_gal_au_eu_internal_logit"
         ] = float(
-            spearmanr(kendall_gal_aleatoric, kendall_gal_epistemic_internal_logit)[0]
+            spearmanr(kendall_gal_aleatoric, kendall_gal_epistemic_internal_logit)
         )
 
     return metrics
@@ -1972,7 +1782,6 @@ def evaluate_on_correlation_of_decompositions(
     model,
     estimates,
     targets,
-    is_same_task,
     is_soft_labels,
     output_dir,
     save_prefix,
@@ -2003,24 +1812,24 @@ def evaluate_on_correlation_of_decompositions(
         )
 
         metrics[f"{key_prefix}rank_correlation_bma_au_eu"] = float(
-            spearmanr(expected_entropies, jensen_shannon_divergences)[0]
+            spearmanr(expected_entropies, jensen_shannon_divergences)
         )
         metrics[f"{key_prefix}correlation_bma_au_eu"] = float(
-            pearsonr(expected_entropies, jensen_shannon_divergences)[0]
+            pearsonr(expected_entropies, jensen_shannon_divergences)
         )
 
         metrics[f"{key_prefix}rank_correlation_bma_au_pu"] = float(
-            spearmanr(expected_entropies, entropies_of_bma)[0]
+            spearmanr(expected_entropies, entropies_of_bma)
         )
         metrics[f"{key_prefix}correlation_bma_au_pu"] = float(
-            pearsonr(expected_entropies, entropies_of_bma)[0]
+            pearsonr(expected_entropies, entropies_of_bma)
         )
 
         metrics[f"{key_prefix}rank_correlation_bma_eu_pu"] = float(
-            spearmanr(jensen_shannon_divergences, entropies_of_bma)[0]
+            spearmanr(jensen_shannon_divergences, entropies_of_bma)
         )
         metrics[f"{key_prefix}correlation_bma_eu_pu"] = float(
-            pearsonr(jensen_shannon_divergences, entropies_of_bma)[0]
+            pearsonr(jensen_shannon_divergences, entropies_of_bma)
         )
 
         # Bregman decomposition estimates
@@ -2035,20 +1844,20 @@ def evaluate_on_correlation_of_decompositions(
         )
 
         metrics[f"{key_prefix}rank_correlation_bregman_eu_au_hat"] = float(
-            spearmanr(expected_divergences, expected_entropies)[0]
+            spearmanr(expected_divergences, expected_entropies)
         )
         metrics[f"{key_prefix}correlation_bregman_eu_au_hat"] = float(
-            pearsonr(expected_divergences, expected_entropies)[0]
+            pearsonr(expected_divergences, expected_entropies)
         )
         metrics[f"{key_prefix}rank_correlation_bregman_eu_pu_hat"] = float(
             spearmanr(
                 expected_divergences, expected_entropies_plus_expected_divergences
-            )[0]
+            )
         )
         metrics[f"{key_prefix}correlation_bregman_eu_pu_hat"] = float(
             pearsonr(
                 expected_divergences, expected_entropies_plus_expected_divergences
-            )[0]
+            )
         )
 
         metrics[f"{key_prefix}rank_correlation_bregman_au_hat_pu_hat"] = float(
@@ -2066,16 +1875,15 @@ def evaluate_on_correlation_of_decompositions(
         return metrics
 
     # Bregman decomposition GTs
-    if is_same_task:
-        gt_predictives_bregman_fbar = targets["gt_predictives_bregman_fbar"]
-        gt_predictives_bregman_bma = targets["gt_predictives_bregman_bma"]
+    gt_predictives_bregman_fbar = targets["gt_predictives_bregman_fbar"]
+    gt_predictives_bregman_bma = targets["gt_predictives_bregman_bma"]
 
-        gt_total_predictives_bregman_fbar = targets["gt_total_predictives_bregman_fbar"]
-        gt_total_predictives_bregman_bma = targets["gt_total_predictives_bregman_bma"]
+    gt_total_predictives_bregman_fbar = targets["gt_total_predictives_bregman_fbar"]
+    gt_total_predictives_bregman_bma = targets["gt_total_predictives_bregman_bma"]
 
-        if is_soft_labels:
-            gt_biases_bregman_fbar = targets["gt_biases_bregman_fbar"]
-            gt_biases_bregman_bma = targets["gt_biases_bregman_bma"]
+    if is_soft_labels:
+        gt_biases_bregman_fbar = targets["gt_biases_bregman_fbar"]
+        gt_biases_bregman_bma = targets["gt_biases_bregman_bma"]
 
     if is_soft_labels:
         gt_aleatorics_bregman = targets["gt_aleatorics_bregman"]
@@ -2083,11 +1891,8 @@ def evaluate_on_correlation_of_decompositions(
     gt_epistemics_bregman = targets["gt_epistemics_bregman"]
 
     can_evaluate_au_eu = is_soft_labels
-    can_evaluate_au_b = can_evaluate_au_pu = can_evaluate_b_pu = (
-        is_same_task and is_soft_labels
-    )
+    can_evaluate_au_b = can_evaluate_au_pu = can_evaluate_b_pu = is_soft_labels
     can_evaluate_eu_b = can_evaluate_au_b
-    can_evaluate_eu_pu = is_same_task
 
     if can_evaluate_au_eu:
         torch.save(
@@ -2096,145 +1901,129 @@ def evaluate_on_correlation_of_decompositions(
         )
 
         metrics[f"{key_prefix}rank_correlation_bregman_au_eu"] = float(
-            spearmanr(gt_aleatorics_bregman, gt_epistemics_bregman)[0]
+            spearmanr(gt_aleatorics_bregman, gt_epistemics_bregman)
         )
         metrics[f"{key_prefix}correlation_bregman_au_eu"] = float(
-            pearsonr(gt_aleatorics_bregman, gt_epistemics_bregman)[0]
+            pearsonr(gt_aleatorics_bregman, gt_epistemics_bregman)
         )
 
     if can_evaluate_au_b:
         metrics[f"{key_prefix}rank_correlation_bregman_au_b_fbar"] = float(
-            spearmanr(gt_aleatorics_bregman, gt_biases_bregman_fbar)[0]
+            spearmanr(gt_aleatorics_bregman, gt_biases_bregman_fbar)
         )
         metrics[f"{key_prefix}correlation_bregman_au_b_fbar"] = float(
-            pearsonr(gt_aleatorics_bregman, gt_biases_bregman_fbar)[0]
+            pearsonr(gt_aleatorics_bregman, gt_biases_bregman_fbar)
         )
 
         metrics[f"{key_prefix}rank_correlation_bregman_au_b_bma"] = float(
-            spearmanr(gt_aleatorics_bregman, gt_biases_bregman_bma)[0]
+            spearmanr(gt_aleatorics_bregman, gt_biases_bregman_bma)
         )
         metrics[f"{key_prefix}correlation_bregman_au_b_bma"] = float(
-            pearsonr(gt_aleatorics_bregman, gt_biases_bregman_bma)[0]
+            pearsonr(gt_aleatorics_bregman, gt_biases_bregman_bma)
         )
 
     if can_evaluate_au_pu:
         metrics[f"{key_prefix}rank_correlation_bregman_au_pu_fbar"] = float(
-            spearmanr(gt_aleatorics_bregman, gt_predictives_bregman_fbar)[0]
+            spearmanr(gt_aleatorics_bregman, gt_predictives_bregman_fbar)
         )
         metrics[f"{key_prefix}correlation_bregman_au_pu_fbar"] = float(
-            pearsonr(gt_aleatorics_bregman, gt_predictives_bregman_fbar)[0]
+            pearsonr(gt_aleatorics_bregman, gt_predictives_bregman_fbar)
         )
 
         metrics[f"{key_prefix}rank_correlation_bregman_au_pu_bma"] = float(
-            spearmanr(gt_aleatorics_bregman, gt_predictives_bregman_bma)[0]
+            spearmanr(gt_aleatorics_bregman, gt_predictives_bregman_bma)
         )
         metrics[f"{key_prefix}correlation_bregman_au_pu_bma"] = float(
-            pearsonr(gt_aleatorics_bregman, gt_predictives_bregman_bma)[0]
+            pearsonr(gt_aleatorics_bregman, gt_predictives_bregman_bma)
         )
 
         metrics[f"{key_prefix}rank_correlation_bregman_au_total_pu_fbar"] = float(
-            spearmanr(gt_aleatorics_bregman, gt_total_predictives_bregman_fbar)[0]
+            spearmanr(gt_aleatorics_bregman, gt_total_predictives_bregman_fbar)
         )
         metrics[f"{key_prefix}correlation_bregman_au_total_pu_fbar"] = float(
-            pearsonr(gt_aleatorics_bregman, gt_total_predictives_bregman_fbar)[0]
+            pearsonr(gt_aleatorics_bregman, gt_total_predictives_bregman_fbar)
         )
 
         metrics[f"{key_prefix}rank_correlation_bregman_au_total_pu_bma"] = float(
-            spearmanr(gt_aleatorics_bregman, gt_total_predictives_bregman_bma)[0]
+            spearmanr(gt_aleatorics_bregman, gt_total_predictives_bregman_bma)
         )
         metrics[f"{key_prefix}correlation_bregman_au_total_pu_bma"] = float(
-            pearsonr(gt_aleatorics_bregman, gt_total_predictives_bregman_bma)[0]
+            pearsonr(gt_aleatorics_bregman, gt_total_predictives_bregman_bma)
         )
 
     if can_evaluate_b_pu:
         metrics[f"{key_prefix}rank_correlation_bregman_b_pu_fbar"] = float(
-            spearmanr(gt_biases_bregman_fbar, gt_predictives_bregman_fbar)[0]
+            spearmanr(gt_biases_bregman_fbar, gt_predictives_bregman_fbar)
         )
         metrics[f"{key_prefix}correlation_bregman_b_pu_fbar"] = float(
-            pearsonr(gt_biases_bregman_fbar, gt_predictives_bregman_fbar)[0]
+            pearsonr(gt_biases_bregman_fbar, gt_predictives_bregman_fbar)
         )
 
         metrics[f"{key_prefix}rank_correlation_bregman_b_pu_bma"] = float(
-            spearmanr(gt_biases_bregman_bma, gt_predictives_bregman_bma)[0]
+            spearmanr(gt_biases_bregman_bma, gt_predictives_bregman_bma)
         )
         metrics[f"{key_prefix}correlation_bregman_b_pu_bma"] = float(
-            pearsonr(gt_biases_bregman_bma, gt_predictives_bregman_bma)[0]
+            pearsonr(gt_biases_bregman_bma, gt_predictives_bregman_bma)
         )
 
         metrics[f"{key_prefix}rank_correlation_bregman_b_total_pu_fbar"] = float(
-            spearmanr(gt_biases_bregman_fbar, gt_total_predictives_bregman_fbar)[0]
+            spearmanr(gt_biases_bregman_fbar, gt_total_predictives_bregman_fbar)
         )
         metrics[f"{key_prefix}correlation_bregman_b_total_pu_fbar"] = float(
-            pearsonr(gt_biases_bregman_fbar, gt_total_predictives_bregman_fbar)[0]
+            pearsonr(gt_biases_bregman_fbar, gt_total_predictives_bregman_fbar)
         )
 
         metrics[f"{key_prefix}rank_correlation_bregman_b_total_pu_bma"] = float(
-            spearmanr(gt_biases_bregman_bma, gt_total_predictives_bregman_bma)[0]
+            spearmanr(gt_biases_bregman_bma, gt_total_predictives_bregman_bma)
         )
         metrics[f"{key_prefix}correlation_bregman_b_total_pu_bma"] = float(
-            pearsonr(gt_biases_bregman_bma, gt_total_predictives_bregman_bma)[0]
+            pearsonr(gt_biases_bregman_bma, gt_total_predictives_bregman_bma)
         )
 
     if can_evaluate_eu_b:
         metrics[f"{key_prefix}rank_correlation_bregman_eu_b_fbar"] = float(
-            spearmanr(gt_epistemics_bregman, gt_biases_bregman_fbar)[0]
+            spearmanr(gt_epistemics_bregman, gt_biases_bregman_fbar)
         )
         metrics[f"{key_prefix}correlation_bregman_eu_b_fbar"] = float(
-            pearsonr(gt_epistemics_bregman, gt_biases_bregman_fbar)[0]
+            pearsonr(gt_epistemics_bregman, gt_biases_bregman_fbar)
         )
 
         metrics[f"{key_prefix}rank_correlation_bregman_eu_b_bma"] = float(
-            spearmanr(gt_epistemics_bregman, gt_biases_bregman_bma)[0]
+            spearmanr(gt_epistemics_bregman, gt_biases_bregman_bma)
         )
         metrics[f"{key_prefix}correlation_bregman_eu_b_bma"] = float(
-            pearsonr(gt_epistemics_bregman, gt_biases_bregman_bma)[0]
+            pearsonr(gt_epistemics_bregman, gt_biases_bregman_bma)
         )
 
-    if can_evaluate_eu_pu:
-        metrics[f"{key_prefix}rank_correlation_bregman_eu_pu_fbar"] = float(
-            spearmanr(gt_epistemics_bregman, gt_predictives_bregman_fbar)[0]
-        )
-        metrics[f"{key_prefix}correlation_bregman_eu_pu_fbar"] = float(
-            pearsonr(gt_epistemics_bregman, gt_predictives_bregman_fbar)[0]
-        )
+    metrics[f"{key_prefix}rank_correlation_bregman_eu_pu_fbar"] = float(
+        spearmanr(gt_epistemics_bregman, gt_predictives_bregman_fbar)
+    )
+    metrics[f"{key_prefix}correlation_bregman_eu_pu_fbar"] = float(
+        pearsonr(gt_epistemics_bregman, gt_predictives_bregman_fbar)
+    )
 
-        metrics[f"{key_prefix}rank_correlation_bregman_eu_pu_bma"] = float(
-            spearmanr(gt_epistemics_bregman, gt_predictives_bregman_bma)[0]
-        )
-        metrics[f"{key_prefix}correlation_bregman_eu_pu_bma"] = float(
-            pearsonr(gt_epistemics_bregman, gt_predictives_bregman_bma)[0]
-        )
+    metrics[f"{key_prefix}rank_correlation_bregman_eu_pu_bma"] = float(
+        spearmanr(gt_epistemics_bregman, gt_predictives_bregman_bma)
+    )
+    metrics[f"{key_prefix}correlation_bregman_eu_pu_bma"] = float(
+        pearsonr(gt_epistemics_bregman, gt_predictives_bregman_bma)
+    )
 
-        metrics[f"{key_prefix}rank_correlation_bregman_eu_total_pu_fbar"] = float(
-            spearmanr(gt_epistemics_bregman, gt_total_predictives_bregman_fbar)[0]
-        )
-        metrics[f"{key_prefix}correlation_bregman_eu_total_pu_fbar"] = float(
-            pearsonr(gt_epistemics_bregman, gt_total_predictives_bregman_fbar)[0]
-        )
+    metrics[f"{key_prefix}rank_correlation_bregman_eu_total_pu_fbar"] = float(
+        spearmanr(gt_epistemics_bregman, gt_total_predictives_bregman_fbar)
+    )
+    metrics[f"{key_prefix}correlation_bregman_eu_total_pu_fbar"] = float(
+        pearsonr(gt_epistemics_bregman, gt_total_predictives_bregman_fbar)
+    )
 
-        metrics[f"{key_prefix}rank_correlation_bregman_eu_total_pu_bma"] = float(
-            spearmanr(gt_epistemics_bregman, gt_total_predictives_bregman_bma)[0]
-        )
-        metrics[f"{key_prefix}correlation_bregman_eu_total_pu_bma"] = float(
-            pearsonr(gt_epistemics_bregman, gt_total_predictives_bregman_bma)[0]
-        )
+    metrics[f"{key_prefix}rank_correlation_bregman_eu_total_pu_bma"] = float(
+        spearmanr(gt_epistemics_bregman, gt_total_predictives_bregman_bma)
+    )
+    metrics[f"{key_prefix}correlation_bregman_eu_total_pu_bma"] = float(
+        pearsonr(gt_epistemics_bregman, gt_total_predictives_bregman_bma)
+    )
 
     return metrics
-
-
-def calculate_auroc(estimate, correctness, args, soft):
-    if not soft:
-        return auroc(correctness, estimate)
-
-    num_repetitions = args.num_repetitions
-    num_positives = (correctness * num_repetitions).round().long()
-    comparison_range = (
-        torch.arange(num_repetitions).unsqueeze(0).expand(correctness.shape[0], -1)
-    )
-    unrolled_labels = (comparison_range < num_positives.unsqueeze(1)).long().flatten()
-    expanded_estimate = estimate.repeat_interleave(num_repetitions)
-
-    return auroc(unrolled_labels, expanded_estimate)
 
 
 def get_bundle(
@@ -2243,7 +2032,6 @@ def get_bundle(
     device,
     amp_autocast,
     is_soft_labels,
-    is_same_task,
     args,
 ):
     estimates = {}
@@ -2259,11 +2047,11 @@ def get_bundle(
 
     # Abstained prediction
     label_shape = next(iter(loader))[1].shape
-    if is_same_task and is_soft_labels:
+    if is_soft_labels:
         assert label_shape[-1] == model.num_classes + 1
 
-    gt_hard_labels = torch.empty(num_samples, dtype=torch.long)
-    gt_hard_labels_original = torch.empty(num_samples, dtype=torch.long)
+    gt_hard_labels = torch.empty(num_samples, dtype=torch.long, device=device)
+    gt_hard_labels_original = torch.empty(num_samples, dtype=torch.long, device=device)
     targets["gt_hard_labels"] = gt_hard_labels
     targets["gt_hard_labels_original"] = gt_hard_labels_original
 
@@ -2281,139 +2069,138 @@ def get_bundle(
     ## Theoretical tasks
 
     if is_soft_labels:
-        gt_soft_labels = torch.empty(num_samples, label_shape[1] - 1)
+        gt_soft_labels = torch.empty(num_samples, label_shape[1] - 1, device=device)
         targets["gt_soft_labels"] = gt_soft_labels
 
         # Aleatoric uncertainty (Bregman)
-        gt_aleatorics_bregman = torch.empty(num_samples)
+        gt_aleatorics_bregman = torch.empty(num_samples, device=device)
         targets["gt_aleatorics_bregman"] = gt_aleatorics_bregman
         # Also interested in how well the GT solves the practical tasks
         estimates["gt_aleatorics_bregman"] = gt_aleatorics_bregman
 
         # Bias (Bregman)
         if not isinstance(model, MCInfoNCEWrapper):
-            gt_biases_bregman_fbar = torch.empty(num_samples)
+            gt_biases_bregman_fbar = torch.empty(num_samples, device=device)
             targets["gt_biases_bregman_fbar"] = gt_biases_bregman_fbar
             estimates["gt_biases_bregman_fbar"] = gt_biases_bregman_fbar
 
-            gt_biases_bregman_bma = torch.empty(num_samples)
+            gt_biases_bregman_bma = torch.empty(num_samples, device=device)
             targets["gt_biases_bregman_bma"] = gt_biases_bregman_bma
             estimates["gt_biases_bregman_bma"] = gt_biases_bregman_bma
 
     ### Estimate containers
-    features = torch.empty(num_samples, model.num_features)
 
     if not isinstance(model, MCInfoNCEWrapper):
         # Predictive uncertainty (Bregman)
-        gt_predictives_bregman_fbar = torch.empty(num_samples)
+        gt_predictives_bregman_fbar = torch.empty(num_samples, device=device)
         targets["gt_predictives_bregman_fbar"] = gt_predictives_bregman_fbar
         estimates["gt_predictives_bregman_fbar"] = gt_predictives_bregman_fbar
 
-        gt_total_predictives_bregman_fbar = torch.empty(num_samples)
+        gt_total_predictives_bregman_fbar = torch.empty(num_samples, device=device)
         targets["gt_total_predictives_bregman_fbar"] = gt_total_predictives_bregman_fbar
         estimates[
             "gt_total_predictives_bregman_fbar"
         ] = gt_total_predictives_bregman_fbar
 
-        gt_predictives_bregman_bma = torch.empty(num_samples)
+        gt_predictives_bregman_bma = torch.empty(num_samples, device=device)
         targets["gt_predictives_bregman_bma"] = gt_predictives_bregman_bma
         estimates["gt_predictives_bregman_bma"] = gt_predictives_bregman_bma
 
-        gt_total_predictives_bregman_bma = torch.empty(num_samples)
+        gt_total_predictives_bregman_bma = torch.empty(num_samples, device=device)
         targets["gt_total_predictives_bregman_bma"] = gt_total_predictives_bregman_bma
         estimates["gt_total_predictives_bregman_bma"] = gt_total_predictives_bregman_bma
 
         # Epistemic uncertainty (Bregman)
-        gt_epistemics_bregman = torch.empty(num_samples)
+        gt_epistemics_bregman = torch.empty(num_samples, device=device)
         targets["gt_epistemics_bregman"] = gt_epistemics_bregman
 
         # Time
         time_forward_m = AverageMeter()
         times["time_forward_m"] = time_forward_m
 
-        log_fbars = torch.empty(num_samples, model.num_classes)
+        log_fbars = torch.empty(num_samples, model.num_classes, device=device)
         log_probs["log_fbars"] = log_fbars
 
-        log_bmas = torch.empty(num_samples, model.num_classes)
+        log_bmas = torch.empty(num_samples, model.num_classes, device=device)
         log_probs["log_bmas"] = log_bmas
 
         # AU
-        expected_entropies = torch.empty(num_samples)
+        expected_entropies = torch.empty(num_samples, device=device)
         estimates["expected_entropies"] = expected_entropies
-        one_minus_expected_max_probs = torch.empty(num_samples)
+        one_minus_expected_max_probs = torch.empty(num_samples, device=device)
         estimates["one_minus_expected_max_probs"] = one_minus_expected_max_probs
 
         # PU
-        entropies_of_bma = torch.empty(num_samples)
+        entropies_of_bma = torch.empty(num_samples, device=device)
         estimates["entropies_of_bma"] = entropies_of_bma
-        entropies_of_fbar = torch.empty(num_samples)  # Just an extra thing to try out
+        entropies_of_fbar = torch.empty(num_samples, device=device)
         estimates["entropies_of_fbar"] = entropies_of_fbar
-        one_minus_max_probs_of_bma = torch.empty(num_samples)
+        one_minus_max_probs_of_bma = torch.empty(num_samples, device=device)
         estimates["one_minus_max_probs_of_bma"] = one_minus_max_probs_of_bma
         one_minus_max_probs_of_fbar = torch.empty(
-            num_samples
+            num_samples, device=device
         )  # Just an extra thing to try out
         estimates["one_minus_max_probs_of_fbar"] = one_minus_max_probs_of_fbar
-        expected_entropies_plus_expected_divergences = torch.empty(num_samples)
+        expected_entropies_plus_expected_divergences = torch.empty(num_samples, device=device)
         estimates[
             "expected_entropies_plus_expected_divergences"
         ] = expected_entropies_plus_expected_divergences
 
         # EU
-        dempster_shafer_values = torch.empty(num_samples)
+        dempster_shafer_values = torch.empty(num_samples, device=device)
         estimates["dempster_shafer_values"] = dempster_shafer_values
         # Just a duplicate
         estimates["expected_divergences"] = gt_epistemics_bregman
-        jensen_shannon_divergences = torch.empty(num_samples)
+        jensen_shannon_divergences = torch.empty(num_samples, device=device)
         estimates["jensen_shannon_divergences"] = jensen_shannon_divergences
 
-        expected_variances_of_probs = torch.empty(num_samples)
+        expected_variances_of_probs = torch.empty(num_samples, device=device)
         estimates["expected_variances_of_probs"] = expected_variances_of_probs
-        expected_variances_of_logits = torch.empty(num_samples)
+        expected_variances_of_logits = torch.empty(num_samples, device=device)
         estimates["expected_variances_of_logits"] = expected_variances_of_logits
 
         # This class gives "logits" that are different from the baseline model.
         if isinstance(model, NonIsotropicvMFWrapper):
-            nivmf_inverse_kappas = torch.empty(num_samples)
+            nivmf_inverse_kappas = torch.empty(num_samples, device=device)
             estimates["nivmf_inverse_kappas"] = nivmf_inverse_kappas
         # This class modifies the model when it's not frozen, leading to different
         # logits.
         elif isinstance(model, BaseLossPredictionWrapper):
             # PU
-            risk_values = torch.empty(num_samples)
+            risk_values = torch.empty(num_samples, device=device)
             estimates["risk_values"] = risk_values
         elif isinstance(model, DDUWrapper):
-            gmm_neg_log_densities = torch.empty(num_samples)
+            gmm_neg_log_densities = torch.empty(num_samples, device=device)
             estimates["gmm_neg_log_densities"] = gmm_neg_log_densities
         # This class also modifies the model when it's not frozen.
         elif isinstance(model, BaseCorrectnessPredictionWrapper):
             # PU
-            error_probabilities = torch.empty(num_samples)
+            error_probabilities = torch.empty(num_samples, device=device)
             estimates["error_probabilities"] = error_probabilities
         # This class gives "logits" that are different from the baseline model.
         elif isinstance(model, DUQWrapper):
             # EU
-            duq_values = torch.empty(num_samples)
+            duq_values = torch.empty(num_samples, device=device)
             estimates["duq_values"] = duq_values
         # While this class returns logits, it's post-hoc. As such, the logits are not
         # changed compared to the baseline model, so we'd get the same results.
         elif isinstance(model, MahalanobisWrapper):
             # EU
-            mahalanobis_values = torch.empty(num_samples)
+            mahalanobis_values = torch.empty(num_samples, device=device)
             estimates["mahalanobis_values"] = mahalanobis_values
         elif isinstance(model, HetClassNNWrapper):
-            expected_variances_of_internal_probs = torch.empty(num_samples)
+            expected_variances_of_internal_probs = torch.empty(num_samples, device=device)
             estimates[
                 "expected_variances_of_internal_probs"
             ] = expected_variances_of_internal_probs
-            expected_variances_of_internal_logits = torch.empty(num_samples)
+            expected_variances_of_internal_logits = torch.empty(num_samples, device=device)
             estimates[
                 "expected_variances_of_internal_logits"
             ] = expected_variances_of_internal_logits
 
     # This class doesn't return any logits.
     else:
-        mcinfonce_inverse_kappas = torch.empty(num_samples)
+        mcinfonce_inverse_kappas = torch.empty(num_samples, device=device)
         estimates["mcinfonce_inverse_kappas"] = mcinfonce_inverse_kappas
 
     if not isinstance(model, DeepEnsembleWrapper):
@@ -2446,7 +2233,7 @@ def get_bundle(
             time_forward = time_forward_end - time_forward_start
 
             for key in list(inference_dict.keys()):
-                inference_dict[key] = inference_dict[key].detach().cpu().float()
+                inference_dict[key] = inference_dict[key].detach().float()
 
             inference_dict = convert_inference_dict(
                 model=model,
@@ -2454,8 +2241,6 @@ def get_bundle(
                 time_forward=time_forward,
                 args=args,
             )
-
-            features[indices] = inference_dict["feature"]
 
             if not isinstance(
                 model,
@@ -2537,69 +2322,66 @@ def get_bundle(
             # GT containers
             if is_soft_labels:
                 prob = label.float() / label.sum(dim=1, keepdim=True)  # Normalization
-                prob = prob.cpu()
                 gt_aleatorics_bregman[indices] = entropy(prob)
 
-            if is_same_task:
+            if not isinstance(model, MCInfoNCEWrapper):
+                log_fbar = inference_dict["log_fbar"]
+                log_bma = inference_dict["log_bma"]
+            if is_soft_labels:
                 if not isinstance(model, MCInfoNCEWrapper):
-                    log_fbar = inference_dict["log_fbar"]
-                    log_bma = inference_dict["log_bma"]
-                if is_soft_labels:
-                    if not isinstance(model, MCInfoNCEWrapper):
-                        log_prob = prob.log()
-                        min_real = torch.finfo(log_prob.dtype).min
-                        log_prob = torch.clamp(log_prob, min=min_real)
+                    log_prob = prob.log()
+                    min_real = torch.finfo(log_prob.dtype).min
+                    log_prob = torch.clamp(log_prob, min=min_real)
 
-                        gt_biases_bregman_fbar[indices] = kl_divergence(
-                            log_prob, log_fbar
-                        )
-                        gt_biases_bregman_bma[indices] = kl_divergence(
-                            log_prob, log_bma
-                        )
-                        gt_predictives_bregman_fbar[indices] = (
-                            gt_aleatorics_bregman[indices]
-                            + gt_biases_bregman_fbar[indices]
-                        )
-                        gt_predictives_bregman_bma[indices] = (
-                            gt_aleatorics_bregman[indices]
-                            + gt_biases_bregman_bma[indices]
-                        )
-                        gt_total_predictives_bregman_fbar[indices] = (
-                            gt_aleatorics_bregman[indices]
-                            + gt_biases_bregman_fbar[indices]
-                            + gt_epistemics_bregman[indices]
-                        )
-                        gt_total_predictives_bregman_bma[indices] = (
-                            gt_aleatorics_bregman[indices]
-                            + gt_biases_bregman_bma[indices]
-                            + gt_epistemics_bregman[indices]
-                        )
-                    gt_soft_labels[indices] = prob
-                    gt_hard_labels_original[indices] = hard_label.cpu()
-                    gt_hard_labels[indices] = prob.argmax(dim=1)
-                else:
-                    gt_hard_labels_original[indices] = label.cpu()
-                    gt_hard_labels[indices] = label.cpu()
+                    gt_biases_bregman_fbar[indices] = kl_divergence(
+                        log_prob, log_fbar
+                    )
+                    gt_biases_bregman_bma[indices] = kl_divergence(
+                        log_prob, log_bma
+                    )
+                    gt_predictives_bregman_fbar[indices] = (
+                        gt_aleatorics_bregman[indices]
+                        + gt_biases_bregman_fbar[indices]
+                    )
+                    gt_predictives_bregman_bma[indices] = (
+                        gt_aleatorics_bregman[indices]
+                        + gt_biases_bregman_bma[indices]
+                    )
+                    gt_total_predictives_bregman_fbar[indices] = (
+                        gt_aleatorics_bregman[indices]
+                        + gt_biases_bregman_fbar[indices]
+                        + gt_epistemics_bregman[indices]
+                    )
+                    gt_total_predictives_bregman_bma[indices] = (
+                        gt_aleatorics_bregman[indices]
+                        + gt_biases_bregman_bma[indices]
+                        + gt_epistemics_bregman[indices]
+                    )
+                gt_soft_labels[indices] = prob
+                gt_hard_labels_original[indices] = hard_label
+                gt_hard_labels[indices] = prob.argmax(dim=1)
+            else:
+                gt_hard_labels_original[indices] = label
+                gt_hard_labels[indices] = label
 
-                    if not isinstance(model, MCInfoNCEWrapper):
-                        gt_predictives_bregman_fbar[indices] = F.cross_entropy(
-                            log_fbar, label.cpu()
-                        )
-                        gt_predictives_bregman_bma[indices] = F.cross_entropy(
-                            log_bma, label.cpu()
-                        )
-                        gt_total_predictives_bregman_fbar[indices] = F.cross_entropy(
-                            log_fbar, label.cpu()
-                        )
-                        gt_total_predictives_bregman_bma[indices] = F.cross_entropy(
-                            log_bma, label.cpu()
-                        )
+                if not isinstance(model, MCInfoNCEWrapper):
+                    gt_predictives_bregman_fbar[indices] = F.cross_entropy(
+                        log_fbar, label
+                    )
+                    gt_predictives_bregman_bma[indices] = F.cross_entropy(
+                        log_bma, label
+                    )
+                    gt_total_predictives_bregman_fbar[indices] = F.cross_entropy(
+                        log_fbar, label
+                    )
+                    gt_total_predictives_bregman_bma[indices] = F.cross_entropy(
+                        log_bma, label
+                    )
 
             current_ind += input.shape[0]
     else:
-        temp_logits = torch.empty(num_samples, model.num_models, model.num_classes)
-        temp_features = torch.empty(num_samples, model.num_models, model.num_features)
-        time_forwards = torch.empty(len(loader), model.num_models)
+        temp_logits = torch.empty(num_samples, model.num_models, model.num_classes, device=device)
+        time_forwards = torch.empty(len(loader), model.num_models, device=device)
 
         for model_index in range(model.num_models):
             model.load_model(model_index)
@@ -2629,14 +2411,11 @@ def get_bundle(
                 time_forward = time_forward_end - time_forward_start
 
                 temp_logits[indices, model_index, :] = inference_dict["logit"]
-                temp_features[indices, model_index, :] = inference_dict["feature"]
                 time_forwards[i, model_index] = time_forward
 
                 current_ind += batch_size
 
-        # Aggregate logits, features, and forward times
-
-        features = temp_features.mean(dim=1)
+        # Aggregate logits and forward times
         time_forwards_sum = time_forwards.sum(dim=-1)
 
         current_ind = 0
@@ -2646,7 +2425,6 @@ def get_bundle(
 
             inference_dict = {
                 "logit": temp_logits[indices],
-                "feature": features[indices],
             }
 
             inference_dict = convert_inference_dict(
@@ -2683,66 +2461,57 @@ def get_bundle(
                 label = label[:, :-1]
 
                 prob = label.float() / label.sum(dim=1, keepdim=True)  # Normalization
-                prob = prob.cpu()
                 gt_aleatorics_bregman[indices] = entropy(prob)
 
-            if is_same_task:
-                log_fbar = inference_dict["log_fbar"]
-                log_bma = inference_dict["log_bma"]
-                if is_soft_labels:
-                    log_prob = prob.log()
-                    min_real = torch.finfo(log_prob.dtype).min
-                    log_prob = torch.clamp(log_prob, min=min_real)
-                    gt_biases_bregman_fbar[indices] = kl_divergence(log_prob, log_fbar)
-                    gt_biases_bregman_bma[indices] = kl_divergence(log_prob, log_bma)
-                    gt_predictives_bregman_fbar[indices] = (
-                        gt_aleatorics_bregman[indices] + gt_biases_bregman_fbar[indices]
-                    )
-                    gt_predictives_bregman_bma[indices] = (
-                        gt_aleatorics_bregman[indices] + gt_biases_bregman_bma[indices]
-                    )
-                    gt_total_predictives_bregman_fbar[indices] = (
-                        gt_aleatorics_bregman[indices]
-                        + gt_biases_bregman_fbar[indices]
-                        + gt_epistemics_bregman[indices]
-                    )
-                    gt_total_predictives_bregman_bma[indices] = (
-                        gt_aleatorics_bregman[indices]
-                        + gt_biases_bregman_bma[indices]
-                        + gt_epistemics_bregman[indices]
-                    )
-                    gt_soft_labels[indices] = prob
-                    gt_hard_labels_original[indices] = hard_label.cpu()
-                    gt_hard_labels[indices] = prob.argmax(dim=1)
-                else:
-                    label = label.cpu()
-                    gt_hard_labels_original[indices] = label
-                    gt_hard_labels[indices] = label
+            log_fbar = inference_dict["log_fbar"]
+            log_bma = inference_dict["log_bma"]
+            if is_soft_labels:
+                log_prob = prob.log()
+                min_real = torch.finfo(log_prob.dtype).min
+                log_prob = torch.clamp(log_prob, min=min_real)
+                gt_biases_bregman_fbar[indices] = kl_divergence(log_prob, log_fbar)
+                gt_biases_bregman_bma[indices] = kl_divergence(log_prob, log_bma)
+                gt_predictives_bregman_fbar[indices] = (
+                    gt_aleatorics_bregman[indices] + gt_biases_bregman_fbar[indices]
+                )
+                gt_predictives_bregman_bma[indices] = (
+                    gt_aleatorics_bregman[indices] + gt_biases_bregman_bma[indices]
+                )
+                gt_total_predictives_bregman_fbar[indices] = (
+                    gt_aleatorics_bregman[indices]
+                    + gt_biases_bregman_fbar[indices]
+                    + gt_epistemics_bregman[indices]
+                )
+                gt_total_predictives_bregman_bma[indices] = (
+                    gt_aleatorics_bregman[indices]
+                    + gt_biases_bregman_bma[indices]
+                    + gt_epistemics_bregman[indices]
+                )
+                gt_soft_labels[indices] = prob
+                gt_hard_labels_original[indices] = hard_label
+                gt_hard_labels[indices] = prob.argmax(dim=1)
+            else:
+                label = label
+                gt_hard_labels_original[indices] = label
+                gt_hard_labels[indices] = label
 
-                    gt_predictives_bregman_fbar[indices] = F.cross_entropy(
-                        log_fbar, label
-                    )
-                    gt_predictives_bregman_bma[indices] = F.cross_entropy(
-                        log_bma, label
-                    )
-                    gt_total_predictives_bregman_fbar[indices] = F.cross_entropy(
-                        log_fbar, label
-                    )
-                    gt_total_predictives_bregman_bma[indices] = F.cross_entropy(
-                        log_bma, label
-                    )
+                gt_predictives_bregman_fbar[indices] = F.cross_entropy(
+                    log_fbar, label
+                )
+                gt_predictives_bregman_bma[indices] = F.cross_entropy(
+                    log_bma, label
+                )
+                gt_total_predictives_bregman_fbar[indices] = F.cross_entropy(
+                    log_fbar, label
+                )
+                gt_total_predictives_bregman_bma[indices] = F.cross_entropy(
+                    log_bma, label
+                )
 
             current_ind += batch_size
 
     # Calculate correctness indicators
-    gt_zero_shot_correctnesses_original = recall_at_one(
-        features, gt_hard_labels_original, mode="faiss"
-    )
-    targets["gt_zero_shot_correctnesses_original"] = gt_zero_shot_correctnesses_original
-    gt_zero_shot_correctnesses = recall_at_one(features, gt_hard_labels, mode="faiss")
-    targets["gt_zero_shot_correctnesses"] = gt_zero_shot_correctnesses
-
-    if is_same_task and not isinstance(model, MCInfoNCEWrapper):
+    if not isinstance(model, MCInfoNCEWrapper):
         predicted_labels_fbar = log_probs["log_fbars"].argmax(dim=1)
 
         targets["gt_hard_fbar_correctnesses_original"] = predicted_labels_fbar.eq(
@@ -2840,16 +2609,12 @@ def get_bundle(
 def convert_inference_dict(model, inference_dict, time_forward, args):
     converted_inference_dict = {}
 
-    features = inference_dict["feature"]
-    converted_inference_dict["feature"] = features
-
     converted_inference_dict["time_forward"] = time_forward
 
     if not isinstance(model, MCInfoNCEWrapper):
-        min_real = torch.finfo(features.dtype).min
-
         if isinstance(model, DirichletWrapper):
             alphas = inference_dict["alpha"]  # [B, C]
+            min_real = torch.finfo(alphas.dtype).min
             log_probs = (
                 torch.distributions.Dirichlet(alphas)
                 .sample((args.num_mc_samples,))
@@ -2920,6 +2685,7 @@ def convert_inference_dict(model, inference_dict, time_forward, args):
             converted_inference_dict["dempster_shafer_value"] = dempster_shafer_value
         else:
             logits = inference_dict["logit"]
+            min_real = torch.finfo(logits.dtype).min
             if logits.dim() == 2:  # [B, C]
                 logits = logits.unsqueeze(dim=1)  # [B, 1, C]
             log_probs = F.log_softmax(logits, dim=-1)  # [B, S, C]
