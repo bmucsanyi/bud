@@ -327,8 +327,8 @@ def auroc(y_true, y_score):
     tps = torch.cumsum(y_true, dim=0)[threshold_idxs]
     fps = 1 + threshold_idxs - tps
 
-    tps = torch.cat([torch.tensor([0]), tps])
-    fps = torch.cat([torch.tensor([0]), fps])
+    tps = torch.cat([torch.tensor([0], device=tps.device), tps])
+    fps = torch.cat([torch.tensor([0], device=fps.device), fps])
 
     if fps[-1] <= 0 or tps[-1] <= 0:
         return torch.nan
