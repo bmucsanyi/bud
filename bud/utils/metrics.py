@@ -52,32 +52,6 @@ def accuracy(output, target, topk=(1,)):
     ]
 
 
-def recall_at_one(features, targets, mode="matmul"):
-    if mode == "matmul":
-        # Expects tensors as inputs
-        features = F.normalize(features, dim=-1)
-        closest_idxes = features.matmul(features.transpose(-2, -1)).topk(2)[1][:, 1]
-        closest_classes = targets[closest_idxes]
-        is_same_class = (closest_classes == targets).int()
-    elif mode == "faiss":
-        # For big data, use faiss. Expects numpy arrays with float32 as inputs
-        features = features.numpy()
-        targets = targets.numpy()
-        features = normalize(features, axis=1)
-        faiss_search_index = faiss.IndexFlatIP(features.shape[-1])
-        faiss_search_index.add(features)
-        # Use 2, because the closest one will be the point itself
-        _, closest_idxes = faiss_search_index.search(features, 2)
-        closest_idxes = closest_idxes[:, 1]
-        closest_classes = targets[closest_idxes]
-        is_same_class = (closest_classes == targets).astype("int")
-        is_same_class = torch.from_numpy(is_same_class)
-    else:
-        raise NotImplementedError(f"mode {mode} not implemented.")
-
-    return is_same_class
-
-
 def entropy(probs, dim=-1):
     log_probs = probs.log()
     min_real = torch.finfo(log_probs.dtype).min
@@ -311,3 +285,47 @@ def coverage_for_accuracy(
 
     coverage_for_accuracy = coverage_for_accuracy / num_samples
     return coverage_for_accuracy
+
+def get_ranks(x: torch.Tensor) -> torch.Tensor:
+    return x.argsort().argsort().float()
+
+def spearmanr(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    if (x == x[0]).all() or (y == y[0]).all():
+        return torch.tensor(float("NaN"), device=x.device)
+
+    x_rank = get_ranks(x)
+    y_rank = get_ranks(y)
+
+    return torch.corrcoef(torch.stack([x_rank, y_rank]))[0, 1]
+
+def pearsonr(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    return torch.corrcoef(torch.stack([x, y]))[0, 1]
+
+
+def auroc(y_true, y_score):
+    """PyTorch implementation of sklearn's binary roc_auc_score without sample weights."""
+    if y_true.shape != y_score.shape:
+        raise ValueError("y_true and y_score have different shapes")
+
+    # Sort scores and corresponding truth values
+    desc_score_indices = torch.argsort(y_score, descending=True)
+    y_score = y_score[desc_score_indices]
+    y_true = y_true[desc_score_indices]
+    
+    # Compute the AUC
+    distinct_value_indices = torch.where(y_score[1:] - y_score[:-1])[0]
+    threshold_idxs = torch.cat([distinct_value_indices, torch.tensor([y_true.numel() - 1])])
+    
+    tps = torch.cumsum(y_true, dim=0)[threshold_idxs]
+    fps = 1 + threshold_idxs - tps
+
+    tps = torch.cat([torch.tensor([0]), tps])
+    fps = torch.cat([torch.tensor([0]), fps])
+
+    if fps[-1] <= 0 or tps[-1] <= 0:
+        return torch.nan
+
+    fpr = fps / fps[-1]
+    tpr = tps / tps[-1]
+
+    return torch.trapz(tpr, fpr)
