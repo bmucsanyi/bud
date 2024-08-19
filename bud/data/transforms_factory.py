@@ -234,18 +234,14 @@ def transforms_cifar_eval(
     use_prefetcher=False,
     mean=CIFAR10_DEFAULT_MEAN,
     std=CIFAR10_DEFAULT_STD,
-    ood_transforms=None,
+    ood_transform_type=None,
     severity=0,
 ):
-    ood_transforms = ood_transforms or []
-
     tfl = []
 
-    if ood_transforms and severity > 0:
-        stochastic_ood_transform = StochasticOODTransform(
-            ood_transforms, severity, dataset_name="cifar"
-        )
-        tfl += [stochastic_ood_transform]
+    if ood_transform_type is not None and severity > 0:
+        ood_transform = OODTransform(ood_transform_type, severity, dataset_name="cifar")
+        tfl += [ood_transform]
 
     if (isinstance(img_size, tuple) and img_size != (32, 32)) or (
         isinstance(img_size, int) and img_size != 32
@@ -273,11 +269,9 @@ def transforms_imagenet_eval(
     use_prefetcher=False,
     mean=IMAGENET_DEFAULT_MEAN,
     std=IMAGENET_DEFAULT_STD,
-    ood_transforms=None,
+    ood_transform_type=None,
     severity=0,
 ):
-    ood_transforms = ood_transforms or []
-
     tfl = []
 
     crop_pct = crop_pct or DEFAULT_CROP_PCT
@@ -323,12 +317,12 @@ def transforms_imagenet_eval(
             tfl += [ResizeKeepRatio(scale_size)]
         tfl += [transforms.CenterCrop(img_size)]
 
-    # Add stochastic OOD transformations
-    if ood_transforms and severity > 0:
-        stochastic_ood_transform = StochasticOODTransform(
-            ood_transforms, severity, dataset_name="imagenet"
+    # Add OOD transformations
+    if ood_transform_type is not None and severity > 0:
+        ood_transform = OODTransform(
+            ood_transform_type, severity, dataset_name="imagenet"
         )
-        tfl += [stochastic_ood_transform]
+        tfl += [ood_transform]
 
     if use_prefetcher:
         # Prefetcher and collate will handle tensor conversion and norm
@@ -351,7 +345,7 @@ class CustomCompose(transforms.Compose):
 
     def __call__(self, img, rng=None):
         for t in self.transforms:
-            if isinstance(t, StochasticOODTransform):
+            if isinstance(t, OODTransform):
                 img = t(img, rng)
             else:
                 img = t(img)
@@ -359,23 +353,36 @@ class CustomCompose(transforms.Compose):
         return img
 
 
-class StochasticOODTransform:
-    def __init__(self, ood_transforms, severity, dataset_name):
+class OODTransform:
+    def __init__(self, ood_transform_type, severity, dataset_name):
         assert any(
             name in dataset_name for name in ["cifar", "imagenet"]
-        ), "Corruption transforms only implemented for CIFAR-10(H) and ImageNet"
+        ), "Corruptions are only implemented for CIFAR-10(H) and ImageNet(-ReaL)"
 
-        self.ood_transforms = ood_transforms
+        self.ood_transform_type = ood_transform_type
         self.severity = severity
 
-        if "cifar" in dataset_name:
-            self.transform_dict = OOD_TRANSFORM_DICT_CIFAR
-        elif "imagenet" in dataset_name:
-            self.transform_dict = OOD_TRANSFORM_DICT_IMAGENET
+        transform_dict = (
+            OOD_TRANSFORM_DICT_CIFAR
+            if "cifar" in dataset_name
+            else OOD_TRANSFORM_DICT_IMAGENET
+        )
+
+        self.has_transform_list = isinstance(ood_transform_type, list)
+
+        if self.has_transform_list:
+            self.transform = transform_dict
+        else:
+            self.transform = transform_dict[ood_transform_type]
 
     def __call__(self, img, rng):
-        idx = rng.integers(low=0, high=len(self.ood_transforms))
-        return self.transform_dict[self.ood_transforms[idx]](img, self.severity, rng)
+        if self.has_transform_list:
+            idx = rng.integers(low=0, high=len(self.ood_transforms))
+            transform = self.transform[self.ood_transform_type[idx]]
+        else:
+            transform = self.transform
+
+        return transform(img, self.severity, rng)
 
 
 def create_transform(
@@ -402,12 +409,10 @@ def create_transform(
     crop_mode=None,
     tf_preprocessing=False,
     separate=False,
-    ood_transforms=None,
+    ood_transform_type=None,
     severity=0,
 ):
-    ood_transforms = ood_transforms or []
-
-    if ood_transforms and severity > 0:
+    if ood_transform_type is not None and severity > 0:
         assert not is_training, "OOD transformations cannot be applied during training"
 
     if isinstance(input_size, (tuple, list)):
@@ -492,7 +497,7 @@ def create_transform(
                     std=std,
                     crop_pct=crop_pct,
                     crop_mode=crop_mode,
-                    ood_transforms=ood_transforms,
+                    ood_transform_type=ood_transform_type,
                     severity=severity,
                 )
             elif "cifar" in dataset_name:
@@ -502,7 +507,7 @@ def create_transform(
                     use_prefetcher=use_prefetcher,
                     mean=mean,
                     std=std,
-                    ood_transforms=ood_transforms,
+                    ood_transform_type=ood_transform_type,
                     severity=severity,
                 )
             else:
