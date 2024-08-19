@@ -55,6 +55,9 @@ __all__ = [
     "vmf_log_norm_const",
     "calculate_same_padding",
     "calculate_output_padding",
+    "pearsonr",
+    "spearmanr",
+    "auroc",
 ]
 
 from .agc import adaptive_clip_grad
@@ -92,6 +95,9 @@ from .metrics import (
     area_under_risk_coverage_curve,
     excess_area_under_risk_coverage_curve,
     coverage_for_accuracy,
+    pearsonr,
+    spearmanr,
+    auroc,
 )
 from .misc import (
     ParseKwargs,
