@@ -28,12 +28,15 @@ _logger = logging.getLogger(__name__)
 
 
 def fast_collate(batch):
-    """A fast collation function optimized for uint8 images (np array or torch) and int64 targets (labels)"""
+    """A fast collation function optimized for uint8 images (np array or torch) and int64
+    targets (labels)
+    """
     assert isinstance(batch[0], tuple)
     batch_size = len(batch)
     if isinstance(batch[0][0], tuple):
-        # This branch 'deinterleaves' and flattens tuples of input tensors into one tensor ordered by position
-        # such that all tuple of position n will end up in a torch.split(tensor, batch_size) in nth position
+        # This branch 'deinterleaves' and flattens tuples of input tensors into one
+        # tensor ordered by position such that all tuple of position n will end up in a
+        # torch.split(tensor, batch_size) in nth position
         inner_tuple_size = len(batch[0][0])
         flattened_batch_size = batch_size * inner_tuple_size
         targets = torch.zeros(flattened_batch_size, dtype=torch.int64)
@@ -238,8 +241,9 @@ def _worker_init(worker_id, worker_seeding="all"):
         np.random.seed(seed % (2**32 - 1))
     else:
         assert worker_seeding in ("all", "part")
-        # random / torch seed already called in dataloader iter class w/ worker_info.seed
-        # to reproduce some old results (same seed + hparam combo), partial seeding is required (skip numpy re-seed)
+        # random/torch seed already called in dataloader iter class w/ worker_info.seed
+        # to reproduce some old results (same seed + hparam combo), partial seeding is
+        # required (skip numpy re-seed)
         if worker_seeding == "all":
             np.random.seed(worker_info.seed % (2**32 - 1))
 
@@ -275,18 +279,18 @@ def create_loader(
     crop_mode=None,
     collate_fn=None,
     pin_memory=False,
-    fp16=False,  # deprecated, use img_dtype
+    fp16=False,  # Deprecated, use img_dtype
     img_dtype=torch.float32,
     device=torch.device("cuda"),
     tf_preprocessing=False,
     use_multi_epochs_loader=False,
     persistent_workers=True,
     worker_seeding="all",
-    ood_transforms=None,
+    ood_transform_type=None,
     severity=0,
     prepare_n_crop_transform=None,
 ):
-    if ood_transforms and severity > 0:
+    if ood_transform_type is not None and severity > 0:
         assert isinstance(dataset, (IterableImageDataset, SoftImageNet)), (
             "On-the-fly OOD transforms are only supported for IterableImageDataset and "
             "SoftImageNet"
@@ -294,7 +298,7 @@ def create_loader(
 
     re_num_splits = 0
     if re_split:
-        # apply RE to second half of batch if no aug split otherwise line up with aug split
+        # Apply RE to second half of batch if no aug split otherwise line up with aug split
         re_num_splits = num_aug_splits or 2
 
     dataset_transform = (
@@ -324,7 +328,7 @@ def create_loader(
             re_count=re_count,
             re_num_splits=re_num_splits,
             separate=num_aug_splits > 0,
-            ood_transforms=ood_transforms,
+            ood_transform_type=ood_transform_type,
             severity=severity,
         )
     )
@@ -335,12 +339,12 @@ def create_loader(
         )
 
     dataset.transform = dataset_transform
-    if ood_transforms:
+    if ood_transform_type:
         assert hasattr(dataset, "set_ood"), "Dataset does not support OOD transforms"
         dataset.set_ood()
 
     if isinstance(dataset, IterableImageDataset):
-        # give Iterable datasets early knowledge of num_workers so that sample estimates
+        # Give Iterable datasets early knowledge of num_workers so that sample estimates
         # are correct before worker processes are launched
         dataset.set_loader_cfg(num_workers=num_workers)
 
@@ -388,7 +392,7 @@ def create_loader(
     try:
         loader = loader_class(dataset, **loader_args)
     except TypeError:
-        loader_args.pop("persistent_workers")  # only in Pytorch 1.7+
+        loader_args.pop("persistent_workers")  # Only in Pytorch 1.7+
         loader = loader_class(dataset, **loader_args)
     if use_prefetcher:
         prefetch_re_prob = re_prob if is_training and not no_aug else 0.0
@@ -398,7 +402,7 @@ def create_loader(
             std=std,
             channels=input_size[0],
             device=device,
-            fp16=fp16,  # deprecated, use img_dtype
+            fp16=fp16,  # Deprecated, use img_dtype
             img_dtype=img_dtype,
             re_prob=prefetch_re_prob,
             re_mode=re_mode,
