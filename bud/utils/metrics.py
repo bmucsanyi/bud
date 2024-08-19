@@ -286,8 +286,10 @@ def coverage_for_accuracy(
     coverage_for_accuracy = coverage_for_accuracy / num_samples
     return coverage_for_accuracy
 
+
 def get_ranks(x: torch.Tensor) -> torch.Tensor:
     return x.argsort().argsort().float()
+
 
 def spearmanr(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     if (x == x[0]).all() or (y == y[0]).all():
@@ -297,6 +299,7 @@ def spearmanr(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     y_rank = get_ranks(y)
 
     return torch.corrcoef(torch.stack([x_rank, y_rank]))[0, 1]
+
 
 def pearsonr(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     return torch.corrcoef(torch.stack([x, y]))[0, 1]
@@ -311,11 +314,16 @@ def auroc(y_true, y_score):
     desc_score_indices = torch.argsort(y_score, descending=True)
     y_score = y_score[desc_score_indices]
     y_true = y_true[desc_score_indices]
-    
+
     # Compute the AUC
     distinct_value_indices = torch.where(y_score[1:] - y_score[:-1])[0]
-    threshold_idxs = torch.cat([distinct_value_indices, torch.tensor([y_true.numel() - 1])])
-    
+    threshold_idxs = torch.cat(
+        [
+            distinct_value_indices,
+            torch.tensor([y_true.numel() - 1], device=y_score.device),
+        ]
+    )
+
     tps = torch.cumsum(y_true, dim=0)[threshold_idxs]
     fps = 1 + threshold_idxs - tps
 
