@@ -86,6 +86,8 @@ def evaluate_bulk(
         metrics[name] = {}
         for ood_transform_type, loader in loaders_subset.items():
             logger.info(f"Evaluating {name} - {ood_transform_type}...")
+            time_eval_start = time.perf_counter()
+
             metrics[name][ood_transform_type] = evaluate(
                 model=model,
                 loader=loader,
@@ -99,7 +101,14 @@ def evaluate_bulk(
                 is_test=is_test,
                 args=args,
             )
-            logger.info(f"Finished evaluating {name} - {ood_transform_type}.")
+
+            time_eval_end = time.perf_counter()
+            time_eval = time_eval_end - time_eval_start
+
+            logger.info(
+                f"Finished evaluating {name} - {ood_transform_type}. "
+                f"Took {time_eval:.2f} seconds."
+            )
         add_average(metrics[name])
 
     # Summarize results
