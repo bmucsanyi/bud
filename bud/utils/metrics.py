@@ -305,7 +305,6 @@ def pearsonr(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
 
 
 def auroc(y_true, y_score):
-    """PyTorch implementation of sklearn's binary roc_auc_score without sample weights."""
     if y_true.shape != y_score.shape:
         raise ValueError("y_true and y_score have different shapes")
 

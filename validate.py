@@ -67,6 +67,7 @@ def evaluate_bulk(
     model,
     loaders,
     device,
+    storage_device,
     amp_autocast,
     key_prefix,
     output_dir,
@@ -87,6 +88,7 @@ def evaluate_bulk(
                 loader=loader,
                 loader_name=f"{name}_{ood_transform_type}",
                 device=device,
+                storage_device=storage_device,
                 amp_autocast=amp_autocast,
                 key_prefix="",
                 output_dir=output_dir,
@@ -141,6 +143,7 @@ def evaluate(
     loader,
     loader_name,
     device,
+    storage_device,
     amp_autocast,
     key_prefix,
     output_dir,
@@ -160,6 +163,7 @@ def evaluate(
         model=model,
         loader=loader,
         device=device,
+        storage_device=storage_device,
         amp_autocast=amp_autocast,
         is_soft_labels=is_soft_labels,
         args=args,
@@ -198,7 +202,7 @@ def evaluate(
         if os.path.exists(path_indices):
             indices = torch.load(path_indices)
         else:
-            indices = torch.randperm(max_num_indices, device=device)[:num_indices]
+            indices = torch.randperm(max_num_indices, device=storage_device)[:num_indices]
             torch.save(indices, path_indices)
 
         upstream_dict = {
@@ -237,7 +241,7 @@ def evaluate(
             downstream_indices = torch.load(path_downstream_indices)
         else:
             downstream_indices = torch.randperm(
-                max_num_downstream_indices, device=device
+                max_num_downstream_indices, device=storage_device
             )[:num_indices_to_keep]
             torch.save(downstream_indices, path_downstream_indices)
 
@@ -270,8 +274,8 @@ def evaluate(
         # Update joint targets
         mixed_targets["gt_oodness"] = torch.cat(
             [
-                torch.zeros((num_indices_to_keep,), device=device),
-                torch.ones((num_indices_to_keep,), device=device),
+                torch.zeros((num_indices_to_keep,), device=storage_device),
+                torch.ones((num_indices_to_keep,), device=storage_device),
             ]
         ).int()
 
@@ -552,13 +556,6 @@ def evaluate_on_correctness_prediction(
         ]
         gt_hard_fbar_correctnesses_top5 = targets["gt_hard_fbar_correctnesses_top5"]
         gt_hard_bma_correctnesses_top5 = targets["gt_hard_bma_correctnesses_top5"]
-
-        if is_soft_labels:
-            gt_soft_fbar_correctnesses = targets["gt_soft_fbar_correctnesses"]
-            gt_soft_bma_correctnesses = targets["gt_soft_bma_correctnesses"]
-
-            gt_soft_fbar_correctnesses_top5 = targets["gt_soft_fbar_correctnesses_top5"]
-            gt_soft_bma_correctnesses_top5 = targets["gt_soft_bma_correctnesses_top5"]
 
     for estimator_name in estimates:
         # In `estimates`, we have *uncertainty* estimates: higher signals more uncertain.
@@ -1994,6 +1991,7 @@ def get_bundle(
     model,
     loader,
     device,
+    storage_device,
     amp_autocast,
     is_soft_labels,
     args,
@@ -2014,8 +2012,8 @@ def get_bundle(
     if is_soft_labels:
         assert label_shape[-1] == model.num_classes + 1
 
-    gt_hard_labels = torch.empty(num_samples, dtype=torch.long, device=device)
-    gt_hard_labels_original = torch.empty(num_samples, dtype=torch.long, device=device)
+    gt_hard_labels = torch.empty(num_samples, dtype=torch.long, device=storage_device)
+    gt_hard_labels_original = torch.empty(num_samples, dtype=torch.long, device=storage_device)
     targets["gt_hard_labels"] = gt_hard_labels
     targets["gt_hard_labels_original"] = gt_hard_labels_original
 
@@ -2033,22 +2031,22 @@ def get_bundle(
     ## Theoretical tasks
 
     if is_soft_labels:
-        gt_soft_labels = torch.empty(num_samples, label_shape[1] - 1, device=device)
+        gt_soft_labels = torch.empty(num_samples, label_shape[1] - 1, device=storage_device)
         targets["gt_soft_labels"] = gt_soft_labels
 
         # Aleatoric uncertainty (Bregman)
-        gt_aleatorics_bregman = torch.empty(num_samples, device=device)
+        gt_aleatorics_bregman = torch.empty(num_samples, device=storage_device)
         targets["gt_aleatorics_bregman"] = gt_aleatorics_bregman
         # Also interested in how well the GT solves the practical tasks
         estimates["gt_aleatorics_bregman"] = gt_aleatorics_bregman
 
         # Bias (Bregman)
         if not isinstance(model, MCInfoNCEWrapper):
-            gt_biases_bregman_fbar = torch.empty(num_samples, device=device)
+            gt_biases_bregman_fbar = torch.empty(num_samples, device=storage_device)
             targets["gt_biases_bregman_fbar"] = gt_biases_bregman_fbar
             estimates["gt_biases_bregman_fbar"] = gt_biases_bregman_fbar
 
-            gt_biases_bregman_bma = torch.empty(num_samples, device=device)
+            gt_biases_bregman_bma = torch.empty(num_samples, device=storage_device)
             targets["gt_biases_bregman_bma"] = gt_biases_bregman_bma
             estimates["gt_biases_bregman_bma"] = gt_biases_bregman_bma
 
@@ -2056,113 +2054,113 @@ def get_bundle(
 
     if not isinstance(model, MCInfoNCEWrapper):
         # Predictive uncertainty (Bregman)
-        gt_predictives_bregman_fbar = torch.empty(num_samples, device=device)
+        gt_predictives_bregman_fbar = torch.empty(num_samples, device=storage_device)
         targets["gt_predictives_bregman_fbar"] = gt_predictives_bregman_fbar
         estimates["gt_predictives_bregman_fbar"] = gt_predictives_bregman_fbar
 
-        gt_total_predictives_bregman_fbar = torch.empty(num_samples, device=device)
+        gt_total_predictives_bregman_fbar = torch.empty(num_samples, device=storage_device)
         targets["gt_total_predictives_bregman_fbar"] = gt_total_predictives_bregman_fbar
         estimates[
             "gt_total_predictives_bregman_fbar"
         ] = gt_total_predictives_bregman_fbar
 
-        gt_predictives_bregman_bma = torch.empty(num_samples, device=device)
+        gt_predictives_bregman_bma = torch.empty(num_samples, device=storage_device)
         targets["gt_predictives_bregman_bma"] = gt_predictives_bregman_bma
         estimates["gt_predictives_bregman_bma"] = gt_predictives_bregman_bma
 
-        gt_total_predictives_bregman_bma = torch.empty(num_samples, device=device)
+        gt_total_predictives_bregman_bma = torch.empty(num_samples, device=storage_device)
         targets["gt_total_predictives_bregman_bma"] = gt_total_predictives_bregman_bma
         estimates["gt_total_predictives_bregman_bma"] = gt_total_predictives_bregman_bma
 
         # Epistemic uncertainty (Bregman)
-        gt_epistemics_bregman = torch.empty(num_samples, device=device)
+        gt_epistemics_bregman = torch.empty(num_samples, device=storage_device)
         targets["gt_epistemics_bregman"] = gt_epistemics_bregman
 
         # Time
         time_forward_m = AverageMeter()
         times["time_forward_m"] = time_forward_m
 
-        log_fbars = torch.empty(num_samples, model.num_classes, device=device)
+        log_fbars = torch.empty(num_samples, model.num_classes, device=storage_device)
         log_probs["log_fbars"] = log_fbars
 
-        log_bmas = torch.empty(num_samples, model.num_classes, device=device)
+        log_bmas = torch.empty(num_samples, model.num_classes, device=storage_device)
         log_probs["log_bmas"] = log_bmas
 
         # AU
-        expected_entropies = torch.empty(num_samples, device=device)
+        expected_entropies = torch.empty(num_samples, device=storage_device)
         estimates["expected_entropies"] = expected_entropies
-        one_minus_expected_max_probs = torch.empty(num_samples, device=device)
+        one_minus_expected_max_probs = torch.empty(num_samples, device=storage_device)
         estimates["one_minus_expected_max_probs"] = one_minus_expected_max_probs
 
         # PU
-        entropies_of_bma = torch.empty(num_samples, device=device)
+        entropies_of_bma = torch.empty(num_samples, device=storage_device)
         estimates["entropies_of_bma"] = entropies_of_bma
-        entropies_of_fbar = torch.empty(num_samples, device=device)
+        entropies_of_fbar = torch.empty(num_samples, device=storage_device)
         estimates["entropies_of_fbar"] = entropies_of_fbar
-        one_minus_max_probs_of_bma = torch.empty(num_samples, device=device)
+        one_minus_max_probs_of_bma = torch.empty(num_samples, device=storage_device)
         estimates["one_minus_max_probs_of_bma"] = one_minus_max_probs_of_bma
         one_minus_max_probs_of_fbar = torch.empty(
-            num_samples, device=device
+            num_samples, device=storage_device
         )  # Just an extra thing to try out
         estimates["one_minus_max_probs_of_fbar"] = one_minus_max_probs_of_fbar
         expected_entropies_plus_expected_divergences = torch.empty(
-            num_samples, device=device
+            num_samples, device=storage_device
         )
         estimates[
             "expected_entropies_plus_expected_divergences"
         ] = expected_entropies_plus_expected_divergences
 
         # EU
-        dempster_shafer_values = torch.empty(num_samples, device=device)
+        dempster_shafer_values = torch.empty(num_samples, device=storage_device)
         estimates["dempster_shafer_values"] = dempster_shafer_values
         # Just a duplicate
         estimates["expected_divergences"] = gt_epistemics_bregman
-        jensen_shannon_divergences = torch.empty(num_samples, device=device)
+        jensen_shannon_divergences = torch.empty(num_samples, device=storage_device)
         estimates["jensen_shannon_divergences"] = jensen_shannon_divergences
 
-        expected_variances_of_probs = torch.empty(num_samples, device=device)
+        expected_variances_of_probs = torch.empty(num_samples, device=storage_device)
         estimates["expected_variances_of_probs"] = expected_variances_of_probs
-        expected_variances_of_logits = torch.empty(num_samples, device=device)
+        expected_variances_of_logits = torch.empty(num_samples, device=storage_device)
         estimates["expected_variances_of_logits"] = expected_variances_of_logits
 
         # This class gives "logits" that are different from the baseline model.
         if isinstance(model, NonIsotropicvMFWrapper):
-            nivmf_inverse_kappas = torch.empty(num_samples, device=device)
+            nivmf_inverse_kappas = torch.empty(num_samples, device=storage_device)
             estimates["nivmf_inverse_kappas"] = nivmf_inverse_kappas
         # This class modifies the model when it's not frozen, leading to different
         # logits.
         elif isinstance(model, BaseLossPredictionWrapper):
             # PU
-            risk_values = torch.empty(num_samples, device=device)
+            risk_values = torch.empty(num_samples, device=storage_device)
             estimates["risk_values"] = risk_values
         elif isinstance(model, DDUWrapper):
-            gmm_neg_log_densities = torch.empty(num_samples, device=device)
+            gmm_neg_log_densities = torch.empty(num_samples, device=storage_device)
             estimates["gmm_neg_log_densities"] = gmm_neg_log_densities
         # This class also modifies the model when it's not frozen.
         elif isinstance(model, BaseCorrectnessPredictionWrapper):
             # PU
-            error_probabilities = torch.empty(num_samples, device=device)
+            error_probabilities = torch.empty(num_samples, device=storage_device)
             estimates["error_probabilities"] = error_probabilities
         # This class gives "logits" that are different from the baseline model.
         elif isinstance(model, DUQWrapper):
             # EU
-            duq_values = torch.empty(num_samples, device=device)
+            duq_values = torch.empty(num_samples, device=storage_device)
             estimates["duq_values"] = duq_values
         # While this class returns logits, it's post-hoc. As such, the logits are not
         # changed compared to the baseline model, so we'd get the same results.
         elif isinstance(model, MahalanobisWrapper):
             # EU
-            mahalanobis_values = torch.empty(num_samples, device=device)
+            mahalanobis_values = torch.empty(num_samples, device=storage_device)
             estimates["mahalanobis_values"] = mahalanobis_values
         elif isinstance(model, HetClassNNWrapper):
             expected_variances_of_internal_probs = torch.empty(
-                num_samples, device=device
+                num_samples, device=storage_device
             )
             estimates[
                 "expected_variances_of_internal_probs"
             ] = expected_variances_of_internal_probs
             expected_variances_of_internal_logits = torch.empty(
-                num_samples, device=device
+                num_samples, device=storage_device
             )
             estimates[
                 "expected_variances_of_internal_logits"
@@ -2170,7 +2168,7 @@ def get_bundle(
 
     # This class doesn't return any logits.
     else:
-        mcinfonce_inverse_kappas = torch.empty(num_samples, device=device)
+        mcinfonce_inverse_kappas = torch.empty(num_samples, device=storage_device)
         estimates["mcinfonce_inverse_kappas"] = mcinfonce_inverse_kappas
 
     if not isinstance(model, DeepEnsembleWrapper):
@@ -2203,7 +2201,7 @@ def get_bundle(
             time_forward = time_forward_end - time_forward_start
 
             for key in list(inference_dict.keys()):
-                inference_dict[key] = inference_dict[key].detach().float()
+                inference_dict[key] = inference_dict[key].detach().float().to(storage_device)
 
             inference_dict = convert_inference_dict(
                 model=model,
@@ -2292,6 +2290,7 @@ def get_bundle(
             # GT containers
             if is_soft_labels:
                 prob = label.float() / label.sum(dim=1, keepdim=True)  # Normalization
+                prob = prob.to(storage_device)
                 gt_aleatorics_bregman[indices] = entropy(prob)
 
             if not isinstance(model, MCInfoNCEWrapper):
@@ -2322,32 +2321,32 @@ def get_bundle(
                         + gt_epistemics_bregman[indices]
                     )
                 gt_soft_labels[indices] = prob
-                gt_hard_labels_original[indices] = hard_label
+                gt_hard_labels_original[indices] = hard_label.to(storage_device)
                 gt_hard_labels[indices] = prob.argmax(dim=1)
             else:
-                gt_hard_labels_original[indices] = label
-                gt_hard_labels[indices] = label
+                gt_hard_labels_original[indices] = label.to(storage_device)
+                gt_hard_labels[indices] = label.to(storage_device)
 
                 if not isinstance(model, MCInfoNCEWrapper):
                     gt_predictives_bregman_fbar[indices] = F.cross_entropy(
-                        log_fbar, label
+                        log_fbar, label.to(storage_device)
                     )
                     gt_predictives_bregman_bma[indices] = F.cross_entropy(
-                        log_bma, label
+                        log_bma, label.to(storage_device)
                     )
                     gt_total_predictives_bregman_fbar[indices] = F.cross_entropy(
-                        log_fbar, label
+                        log_fbar, label.to(storage_device)
                     )
                     gt_total_predictives_bregman_bma[indices] = F.cross_entropy(
-                        log_bma, label
+                        log_bma, label.to(storage_device)
                     )
 
             current_ind += input.shape[0]
     else:
         temp_logits = torch.empty(
-            num_samples, model.num_models, model.num_classes, device=device
+            num_samples, model.num_models, model.num_classes, device=storage_device
         )
-        time_forwards = torch.empty(len(loader), model.num_models, device=device)
+        time_forwards = torch.empty(len(loader), model.num_models, device=storage_device)
 
         for model_index in range(model.num_models):
             model.load_model(model_index)
@@ -2376,7 +2375,7 @@ def get_bundle(
                 time_forward_end = time.perf_counter()
                 time_forward = time_forward_end - time_forward_start
 
-                temp_logits[indices, model_index, :] = inference_dict["logit"]
+                temp_logits[indices, model_index, :] = inference_dict["logit"].to(storage_device)
                 time_forwards[i, model_index] = time_forward
 
                 current_ind += batch_size
@@ -2427,6 +2426,7 @@ def get_bundle(
                 label = label[:, :-1]
 
                 prob = label.float() / label.sum(dim=1, keepdim=True)  # Normalization
+                prob = prob.to(storage_device)
                 gt_aleatorics_bregman[indices] = entropy(prob)
 
             log_fbar = inference_dict["log_fbar"]
@@ -2454,10 +2454,10 @@ def get_bundle(
                     + gt_epistemics_bregman[indices]
                 )
                 gt_soft_labels[indices] = prob
-                gt_hard_labels_original[indices] = hard_label
+                gt_hard_labels_original[indices] = hard_label.to(storage_device)
                 gt_hard_labels[indices] = prob.argmax(dim=1)
             else:
-                label = label
+                label = label.to(storage_device)
                 gt_hard_labels_original[indices] = label
                 gt_hard_labels[indices] = label
 

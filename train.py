@@ -262,6 +262,11 @@ group.add_argument(
     help="do not evaluate model on the provided OOD test sets (default: False)",
 )
 group.add_argument(
+    "--storage-device",
+    default="cpu",
+    help="storage device during evaluation (default: False)",
+)
+group.add_argument(
     "--severities",
     type=int_list,
     default=[1, 2, 3, 4, 5],
@@ -1498,6 +1503,8 @@ def main():
 
     args.prefetcher = not args.no_prefetcher
     device = utils.init_distributed_device(args)
+    storage_device = torch.device(args.storage_device)
+
     if args.distributed:
         logger.info(
             "Training in distributed mode with multiple processes, 1 device per process."
@@ -1956,6 +1963,7 @@ def main():
                 loader=loader_id_eval,
                 loader_name=args.dataset_id,
                 device=device,
+                storage_device=storage_device,
                 amp_autocast=amp_autocast,
                 key_prefix="id_eval",
                 output_dir=output_dir,
@@ -2035,6 +2043,7 @@ def main():
                 loader_id_test=loader_id_test,
                 loaders_ood_test=loaders_ood_test,
                 device=device,
+                storage_device=storage_device,
                 amp_autocast=amp_autocast,
                 output_dir=output_dir,
                 discard_ood_test_sets=args.discard_ood_test_sets,
@@ -2066,6 +2075,7 @@ def evaluate_on_test_sets(
     loader_id_test,
     loaders_ood_test,
     device,
+    storage_device,
     amp_autocast,
     output_dir,
     discard_ood_test_sets,
@@ -2076,6 +2086,7 @@ def evaluate_on_test_sets(
         loader=loader_id_test,
         loader_name=args.dataset_id,
         device=device,
+        storage_device=storage_device,
         amp_autocast=amp_autocast,
         key_prefix="id_test",
         output_dir=output_dir,
@@ -2091,6 +2102,7 @@ def evaluate_on_test_sets(
         model=model,
         loaders=loaders_ood_test,
         device=device,
+        storage_device=storage_device,
         amp_autocast=amp_autocast,
         key_prefix="ood_test",
         output_dir=output_dir,
