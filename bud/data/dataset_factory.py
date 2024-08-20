@@ -36,13 +36,10 @@ try:
     has_qmnist = True
 except ImportError:
     has_qmnist = False
-try:
-    from .dataset import SoftImageNet
-    from .imagenet import ImageNet
 
-    has_imagenet = True
-except ImportError:
-    has_imagenet = False
+from .dataset import SoftImageNet, SoftDataset
+from .imagenet import ImageNet
+
 
 from .dataset import ImageDataset, IterableImageDataset
 
@@ -169,9 +166,6 @@ def create_dataset(
             use_train = split in _TRAIN_SYNONYM
             ds = QMNIST(train=use_train, **torch_kwargs)
         elif name == "imagenet":
-            assert (
-                has_imagenet
-            ), "Please update to a newer PyTorch and torchvision for ImageNet dataset."
             if split in _EVAL_SYNONYM:
                 split = "val"
             torch_kwargs.pop("download")
@@ -217,22 +211,15 @@ def create_dataset(
     elif name.startswith("soft/") or name.startswith("repr/"):
         if name.split("/", 2)[-1] == "imagenet":
             assert (
-                has_imagenet
-            ), "Please update to a newer PyTorch and torchvision for ImageNet dataset."
-            assert (
                 split in _EVAL_SYNONYM
             ), "soft/imagenet is only available for the validation dataset"
             ds = SoftImageNet(root, label_root, **kwargs)
         else:
-            ds = IterableImageDataset(
-                root,
-                reader=name,
+            ds = SoftDataset(
+                name=name,
+                root=root,
                 split=split,
                 is_training=is_training,
-                batch_size=batch_size,
-                repeats=repeats,
-                seed=seed,
-                **kwargs,
             )
     else:
         # FIXME support more advanced split cfg for ImageFolder/Tar datasets in the

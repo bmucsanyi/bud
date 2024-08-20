@@ -27,31 +27,6 @@ def create_reader(name, root, split="train", **kwargs):
 
         kwargs.pop("download", False)
         reader = ReaderWds(root, name, split=split, **kwargs)
-    elif prefix == "soft":
-        from .reader_soft import ReaderSoft
-
-        dataset_name_to_path = {
-            # Closest datasets to ImageNet (containing natural objects)
-            "cifar10": "CIFAR10H",
-            "treeversity1": "Treeversity#1",
-            "turkey": "Turkey",
-            "pig": "Pig",
-            "benthic": "Benthic",
-            # Medical datasets (bit larger shift from pretraining)
-            "micebone": "MiceBone",
-            "planktion": "Planktion",
-            "qualitymri": "QualityMRI",
-            # Synthetic dataset, currently unused
-            "synthetic": "Synthetic",
-            # Same as Treeversity#6, but with 6 tags per image instead of one class
-            # (doesn't make sense to use both Treeversity#1 and Treeversity#6)
-            "treeversity6": "Treeversity#6",
-        }
-        ds_path = dataset_name_to_path.get(name)
-        assert ds_path is not None, f"Soft label dataset {name} is not implemented."
-        ds_path = os.path.join(root, ds_path)
-
-        reader = ReaderSoft(ds_path, split=split, **kwargs)
     elif prefix == "repr":
         if name == "cub":
             from .reader_repr import ReaderCUB

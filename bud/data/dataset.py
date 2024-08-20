@@ -8,7 +8,7 @@ import json
 import logging
 import os
 from typing import Any, Optional, Tuple
-
+from torchvision.datasets.folder import pil_loader
 import numpy as np
 import torch
 import torch.utils.data as data
@@ -21,6 +21,24 @@ _logger = logging.getLogger(__name__)
 
 
 _ERROR_RETRY = 50
+
+DATASET_NAME_TO_PATH = {
+    # Closest datasets to ImageNet (containing natural objects)
+    "cifar10": "CIFAR10H",
+    "treeversity1": "Treeversity#1",
+    "turkey": "Turkey",
+    "pig": "Pig",
+    "benthic": "Benthic",
+    # Medical datasets (bit larger shift from pretraining)
+    "micebone": "MiceBone",
+    "planktion": "Planktion",
+    "qualitymri": "QualityMRI",
+    # Synthetic dataset, currently unused
+    "synthetic": "Synthetic",
+    # Same as Treeversity#6, but with 6 tags per image instead of one class
+    # (doesn't make sense to use both Treeversity#1 and Treeversity#6)
+    "treeversity6": "Treeversity#6",
+}
 
 
 class ImageDataset(data.Dataset):
@@ -305,3 +323,123 @@ class SoftImageNet(ImageNet):
         # They should be ignored in computing the metrics
 
         return soft_labels_array, filepath_to_imgid
+
+class SoftDataset(data.Dataset):
+    def __init__(
+        self,
+        name,
+        root,
+        split="train",
+        is_training=False,
+    ):
+        ds_path = DATASET_NAME_TO_PATH[name]
+        root = os.path.join(root, ds_path)
+
+        # Load the soft labels
+        (
+            self.soft_labels,
+            self.class_to_idx,
+            self.filepath_to_imgid,
+        ) = self.load_raw_annotations(os.path.join(root, "annotations.json"))
+        self.soft_labels = np.concatenate(
+            [self.soft_labels, self.soft_labels.argmax(axis=-1, keepdims=True)], axis=-1
+        )
+
+        self.root = os.path.split(root)[0]
+        self.samples = self.filepath_to_imgid.keys()
+
+        # Restrict self.samples to val/test
+        current_folds = []
+        if split == "validation":
+            current_folds = [
+                f"fold{i}" for i in range(1, 3)
+            ]
+        elif split == "test":
+            current_folds = [
+                f"fold{i}" for i in range(3, 6)
+            ]
+        elif split == "all":
+            current_folds = [
+                f"fold{i}" for i in range(1, 6)
+            ]
+        self.samples = [s for s in self.samples if any(f in s for f in current_folds)]
+
+        if len(self.samples) == 0:
+            raise RuntimeError(
+                f"Found 0 images in subfolders of {root}."
+            )
+
+        self.transform = None
+        self.target_transform = None
+        self._consecutive_errors = 0
+        self.is_training = is_training
+        self.split = split
+        self.is_ood = False
+
+    def __getitem__(self, index):
+        """
+        Return format is
+        1) PIL image
+        2) array where first column is target label and remaining columns are raw label
+           counts
+        """
+        path = self.samples[index]
+        path = os.path.join(self.root, path)
+
+        target = self.soft_labels[self.filepath_to_imgid[path], :]
+        img = pil_loader(path)
+        
+        if self.transform is not None and self.is_ood:
+            rng = np.random.default_rng(seed=index)
+            img = self.transform(img, rng)
+        elif self.transform is not None:
+            img = self.transform(img)
+
+        if self.target_transform is not None:
+            target = self.target_transform(target)
+        
+        return img, target
+
+    def set_ood(self):
+        self.is_ood = True
+
+    def __len__(self):
+        return len(self.samples)
+
+    @staticmethod
+    def load_raw_annotations(path):
+        """
+        Casts the raw annotations from an annotations.json into a numpy array of label
+        votes per image.
+        """
+        with open(path) as f:
+            raw = json.load(f)
+
+            # Collect all annotations
+            img_filepath = []
+            labels = []
+            for annotator in raw:
+                for entry in annotator["annotations"]:
+                    # Add only valid annotations to table
+                    if (label := entry["class_label"]) is not None:
+                        img_filepath.append(entry["image_path"])
+                        labels.append(label)
+
+            # Summarize the annotations
+            unique_img_filepath = list(np.unique(np.array(img_filepath)))
+            filepath_to_imgid = dict(
+                zip(unique_img_filepath, list(np.arange(0, len(unique_img_filepath))))
+            )
+            unique_labels = list(np.unique(np.array(labels)))
+            classname_to_labelid = dict(
+                zip(unique_labels, list(np.arange(0, len(unique_labels))))
+            )
+            soft_labels = np.zeros(
+                (len(unique_img_filepath), len(unique_labels)), dtype=np.int64
+            )
+            for filepath, classname in zip(img_filepath, labels):
+                soft_labels[
+                    filepath_to_imgid[filepath], classname_to_labelid[classname]
+                ] += 1
+
+            return soft_labels, classname_to_labelid, filepath_to_imgid
