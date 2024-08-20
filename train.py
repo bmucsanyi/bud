@@ -1354,6 +1354,14 @@ group.add_argument(
     help="how many training processes to use (default: 4)",
 )
 group.add_argument(
+    "-j",
+    "--eval-workers",
+    type=int,
+    default=4,
+    metavar="N",
+    help="how many eval processes to use (default: 4)",
+)
+group.add_argument(
     "--amp",
     action="store_true",
     default=False,
@@ -2231,7 +2239,7 @@ def create_loaders(data_config, args, device, num_aug_splits, collate_fn):
     ) = create_datasets(args, num_aug_splits)
 
     # Create data loaders w/ augmentation pipeline
-    num_eval_workers = 1
+    num_eval_workers = args.eval_workers
     train_interpolation = args.train_interpolation
 
     if args.no_aug or not train_interpolation:
