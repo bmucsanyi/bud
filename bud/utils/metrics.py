@@ -173,29 +173,27 @@ def calibration_error(
 
 
 def area_under_lift_curve(
-    uncertainties: Tensor, correctnesses: Tensor, reverse_sort: bool = False
-) -> Tensor:
-    correctnesses = correctnesses.float()
+    uncertainties: torch.Tensor, correctnesses: torch.Tensor, reverse_sort: bool = False
+) -> torch.Tensor:
+    uncertainties = uncertainties.double()
+    correctnesses = correctnesses.double()
     batch_size = correctnesses.shape[0]
 
-    if reverse_sort:
-        sorted_idx = torch.argsort(
-            uncertainties, descending=True
-        )  # Most uncertain indices first
-    else:
-        sorted_idx = torch.argsort(uncertainties)  # Most certain indices first
-
+    sorted_idx = torch.argsort(uncertainties, descending=reverse_sort)
     sorted_correctnesses = correctnesses[sorted_idx]
-    lift = torch.zeros((batch_size,), dtype=torch.float32, device=uncertainties.device)
-    accuracy = correctnesses.mean()
-    lift[0] = sorted_correctnesses[0] / accuracy
 
-    for i in range(1, batch_size):
-        lift[i] = (i * lift[i - 1] + sorted_correctnesses[i] / accuracy) / (i + 1)
+    accuracy = correctnesses.mean()
+    cumulative_correctness = torch.cumsum(sorted_correctnesses, dim=0)
+    indices = torch.arange(
+        1, batch_size + 1, device=uncertainties.device, dtype=torch.double
+    )
+
+    lift = (cumulative_correctness / indices) / accuracy
 
     step = 1 / batch_size
+    result = lift.sum() * step - 1
 
-    return lift.sum() * step - 1
+    return result.float()
 
 
 def relative_area_under_lift_curve(
@@ -225,21 +223,23 @@ def centered_cov(x):
 
 
 def area_under_risk_coverage_curve(
-    uncertainties: Tensor, correctnesses: Tensor
-) -> Tensor:
+    uncertainties: torch.Tensor, correctnesses: torch.Tensor
+) -> torch.Tensor:
+    uncertainties = uncertainties.double()
+    correctnesses = correctnesses.double()
+
     sorted_indices = torch.argsort(uncertainties)
     correctnesses = correctnesses[sorted_indices]
     total_samples = uncertainties.shape[0]
-    aurc = torch.tensor(0.0, device=uncertainties.device)
-    incorrect_num = 0
 
-    for i in range(total_samples):
-        incorrect_num += 1 - correctnesses[i]
-        aurc += incorrect_num / (i + 1)
+    cumulative_incorrect = torch.cumsum(1 - correctnesses, dim=0)
+    indices = torch.arange(
+        1, total_samples + 1, device=uncertainties.device, dtype=torch.double
+    )
 
-    aurc = aurc / total_samples
+    aurc = torch.sum(cumulative_incorrect / indices) / total_samples
 
-    return aurc
+    return aurc.float()
 
 
 def excess_area_under_risk_coverage_curve(
