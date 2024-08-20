@@ -1346,7 +1346,6 @@ group.add_argument(
     help="number of checkpoints to keep (default: 10)",
 )
 group.add_argument(
-    "-j",
     "--workers",
     type=int,
     default=4,
@@ -1354,7 +1353,6 @@ group.add_argument(
     help="how many training processes to use (default: 4)",
 )
 group.add_argument(
-    "-j",
     "--eval-workers",
     type=int,
     default=4,
