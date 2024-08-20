@@ -202,7 +202,9 @@ def evaluate(
         if os.path.exists(path_indices):
             indices = torch.load(path_indices)
         else:
-            indices = torch.randperm(max_num_indices, device=storage_device)[:num_indices]
+            indices = torch.randperm(max_num_indices, device=storage_device)[
+                :num_indices
+            ]
             torch.save(indices, path_indices)
 
         upstream_dict = {
@@ -2013,7 +2015,9 @@ def get_bundle(
         assert label_shape[-1] == model.num_classes + 1
 
     gt_hard_labels = torch.empty(num_samples, dtype=torch.long, device=storage_device)
-    gt_hard_labels_original = torch.empty(num_samples, dtype=torch.long, device=storage_device)
+    gt_hard_labels_original = torch.empty(
+        num_samples, dtype=torch.long, device=storage_device
+    )
     targets["gt_hard_labels"] = gt_hard_labels
     targets["gt_hard_labels_original"] = gt_hard_labels_original
 
@@ -2031,7 +2035,9 @@ def get_bundle(
     ## Theoretical tasks
 
     if is_soft_labels:
-        gt_soft_labels = torch.empty(num_samples, label_shape[1] - 1, device=storage_device)
+        gt_soft_labels = torch.empty(
+            num_samples, label_shape[1] - 1, device=storage_device
+        )
         targets["gt_soft_labels"] = gt_soft_labels
 
         # Aleatoric uncertainty (Bregman)
@@ -2058,7 +2064,9 @@ def get_bundle(
         targets["gt_predictives_bregman_fbar"] = gt_predictives_bregman_fbar
         estimates["gt_predictives_bregman_fbar"] = gt_predictives_bregman_fbar
 
-        gt_total_predictives_bregman_fbar = torch.empty(num_samples, device=storage_device)
+        gt_total_predictives_bregman_fbar = torch.empty(
+            num_samples, device=storage_device
+        )
         targets["gt_total_predictives_bregman_fbar"] = gt_total_predictives_bregman_fbar
         estimates[
             "gt_total_predictives_bregman_fbar"
@@ -2068,7 +2076,9 @@ def get_bundle(
         targets["gt_predictives_bregman_bma"] = gt_predictives_bregman_bma
         estimates["gt_predictives_bregman_bma"] = gt_predictives_bregman_bma
 
-        gt_total_predictives_bregman_bma = torch.empty(num_samples, device=storage_device)
+        gt_total_predictives_bregman_bma = torch.empty(
+            num_samples, device=storage_device
+        )
         targets["gt_total_predictives_bregman_bma"] = gt_total_predictives_bregman_bma
         estimates["gt_total_predictives_bregman_bma"] = gt_total_predictives_bregman_bma
 
@@ -2201,7 +2211,9 @@ def get_bundle(
             time_forward = time_forward_end - time_forward_start
 
             for key in list(inference_dict.keys()):
-                inference_dict[key] = inference_dict[key].detach().float().to(storage_device)
+                inference_dict[key] = (
+                    inference_dict[key].detach().float().to(storage_device)
+                )
 
             inference_dict = convert_inference_dict(
                 model=model,
@@ -2346,7 +2358,9 @@ def get_bundle(
         temp_logits = torch.empty(
             num_samples, model.num_models, model.num_classes, device=storage_device
         )
-        time_forwards = torch.empty(len(loader), model.num_models, device=storage_device)
+        time_forwards = torch.empty(
+            len(loader), model.num_models, device=storage_device
+        )
 
         for model_index in range(model.num_models):
             model.load_model(model_index)
@@ -2375,7 +2389,9 @@ def get_bundle(
                 time_forward_end = time.perf_counter()
                 time_forward = time_forward_end - time_forward_start
 
-                temp_logits[indices, model_index, :] = inference_dict["logit"].to(storage_device)
+                temp_logits[indices, model_index, :] = inference_dict["logit"].to(
+                    storage_device
+                )
                 time_forwards[i, model_index] = time_forward
 
                 current_ind += batch_size
