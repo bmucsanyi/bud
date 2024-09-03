@@ -549,7 +549,7 @@ OOD_TRANSFORM_DICT_IMAGENET = {
     "shot_noise": shot_noise,
     "impulse_noise": impulse_noise,
     "defocus_blur": defocus_blur,
-    "frosted_glass_blur": frosted_glass_blur,  #
+    "frosted_glass_blur": frosted_glass_blur,
     "motion_blur": motion_blur,
     "zoom_blur": zoom_blur,
     "snow": snow,
