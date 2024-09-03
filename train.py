@@ -2200,17 +2200,20 @@ def create_datasets(args, num_aug_splits):
 
     datasets_ood_test = {}
     for name, location in dataset_locations_ood_test.items():
-        dataset = create_dataset(
-            name=name[:-2],
-            root=location,
-            label_root=args.soft_imagenet_label_dir,
-            split=args.test_split,
-            download=args.dataset_download,
-            class_map=args.class_map,
-            batch_size=args.batch_size,
-            is_training=False,
-        )
-        datasets_ood_test[name] = dataset
+        datasets_ood_test[name] = {}
+        
+        for ood_transform_type in args.ood_transforms_test:
+            dataset = create_dataset(
+                name=name[:-2],
+                root=location,
+                label_root=args.soft_imagenet_label_dir,
+                split=args.test_split,
+                download=args.dataset_download,
+                class_map=args.class_map,
+                batch_size=args.batch_size,
+                is_training=False,
+            )
+            datasets_ood_test[name][ood_transform_type] = dataset
 
     # Wrap dataset in AugMix helper
     if num_aug_splits > 1:
@@ -2350,10 +2353,10 @@ def create_loaders(data_config, args, device, num_aug_splits, collate_fn):
     )
 
     loaders_ood_test = {}
-    for name, dataset in datasets_ood_test.items():
+    for name, dataset_subset in datasets_ood_test.items():
         loaders_ood_test[name] = {}
 
-        for ood_transform_type in args.ood_transforms_test:
+        for ood_transform_type, dataset in dataset_subset.items():
             loaders_ood_test[name][ood_transform_type] = create_loader(
                 dataset,
                 dataset_name=name,
